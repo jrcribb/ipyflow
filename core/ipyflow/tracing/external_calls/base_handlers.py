@@ -198,7 +198,7 @@ class ExternalCallHandler(metaclass=HasGetitem):
 
     def mutate_aliases(self, obj_id: Optional[int], should_propagate: bool) -> None:
         mutated_syms = flow().aliases.get(obj_id or -1, set())
-        for sym in mutated_syms:
+        for sym in list(mutated_syms):
             self._mutate_calling_symbol(sym, should_propagate=should_propagate)
 
     def _mutate_calling_symbol(self, sym: "Symbol", should_propagate: bool) -> None:
