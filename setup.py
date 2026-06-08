@@ -1,9 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import os
+import sys
 from glob import glob
+
 from setuptools import setup
 
-import versioneer
+# Ensure the vendored versioneer.py is importable under PEP 517 build isolation
+# (isolated builds don't put the project root on sys.path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import versioneer  # noqa: E402
 
 pkg_name = "ipyflow"
 

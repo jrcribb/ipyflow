@@ -16,4 +16,4 @@ cp ./frontend/labextension/install.json ./core/ipyflow/resources/labextension
 pushd ./core
 python -m build
 popd
-python setup.py sdist bdist_wheel --universal
+python -m build --sdist --wheel

@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 .PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel
 
+# Prefer uv if available, otherwise fall back to pip. Override with `make <t> PIP=...`.
+ifeq ($(shell command -v uv 2>/dev/null),)
+PIP := python -m pip
+else
+PIP := uv pip
+endif
+
 clean:
 	rm -rf __pycache__ core/__pycache__ build/ core/build/ core/dist/ dist/ ipyflow.egg-info/ core/ipyflow_core.egg-info core/ipyflow/resources/labextension
 
@@ -60,11 +67,14 @@ test: check
 tests: check
 
 deps:
-	pip install -r requirements.txt
+	$(PIP) install -r requirements.txt
 
 devdeps:
-	pip install -e .
-	pip install -e .[dev]
+	$(PIP) install -e .
+	$(PIP) install -e .[dev]
+	# reinstall ipyflow-core editable last: installing the root pins it to the
+	# released version on PyPI, which would otherwise clobber the local checkout
+	$(PIP) install -e ./core[dev]
 
 extlink:
 	./scripts/extlink.sh
