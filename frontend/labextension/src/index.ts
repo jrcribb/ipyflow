@@ -258,18 +258,43 @@ const extension: JupyterFrontEndPlugin<void> = {
       [runMenuRunCommand, runMenuRunCommandExecute, 'runmenu:run'],
     ].forEach(([command, exec, commandId]) => {
       command.execute = (...args: any[]) => {
-        const state = getIpyflowState();
-        state.inProgressExecs++;
-        const nbpanel = notebooks.currentWidget;
-        const notebook = nbpanel.content;
-        const kernel = nbpanel.sessionContext.session.kernel.name;
-        if (kernel === 'ipyflow' && !(state?.isIpyflowCommConnected ?? false)) {
+        // Always forward the original command's result promise so that callers
+        // which serialize on it (run-and-advance, restart-and-run, automation)
+        // observe real completion instead of resolving immediately. Use apply
+        // so the original execute receives its real args object rather than the
+        // rest-collected array.
+        const runOriginal = () => exec.apply(command, args);
+
+        // Inspect ipyflow/session state defensively. A transient null widget,
+        // session, or kernel (e.g. during kernel restart or notebook switch)
+        // must not abort the run -- fall back to vanilla execution instead of
+        // throwing before the cell is ever submitted.
+        let state!: IpyflowSessionState;
+        let notebook!: Notebook;
+        let kernel: string | undefined = undefined;
+        let connected = false;
+        try {
+          const nbpanel = notebooks.currentWidget;
+          if (nbpanel == null) {
+            return runOriginal();
+          }
+          state = getIpyflowState();
+          notebook = nbpanel.content;
+          kernel = nbpanel.sessionContext?.session?.kernel?.name;
+          connected = state?.isIpyflowCommConnected ?? false;
+        } catch (e) {
+          console.error('ipyflow: run-cell wrapper error, running normally', e);
+          return runOriginal();
+        }
+
+        if (kernel === 'ipyflow' && !connected) {
           for (const cell of notebook.widgets) {
             if (notebook.isSelectedOrActive(cell)) {
               cell.setPrompt('*');
               deferredCells.push(cell);
             }
           }
+          return;
         } else if (
           isBatchReactive() &&
           state?.activeCell?.model?.type === 'code'
@@ -291,13 +316,35 @@ const extension: JupyterFrontEndPlugin<void> = {
               app.commands.execute('notebook:move-cursor-down');
             }
           }
+          return;
+        } else if (!connected) {
+          // Not an ipyflow session: behave exactly like vanilla JupyterLab.
+          // Do not touch inProgressExecs or request a schedule recompute, which
+          // would needlessly tear down and recreate the (rejected) comm on
+          // every single cell execution.
+          return runOriginal();
         } else {
-          exec.call(command, args).then(() => {
+          state.inProgressExecs++;
+          const settle = () => {
             if (--state.inProgressExecs <= 0) {
               state.inProgressExecs = 0;
               state.requestComputeExecSchedule();
             }
-          });
+          };
+          let result: Promise<any>;
+          try {
+            result = Promise.resolve(runOriginal());
+          } catch (err) {
+            settle();
+            throw err;
+          }
+          return result.then(
+            () => settle(),
+            (err: any) => {
+              settle();
+              throw err;
+            }
+          );
         }
       };
     });
