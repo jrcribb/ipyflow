@@ -35,7 +35,6 @@ class ResolvedSymbol(CommonEqualityMixin):
         self.is_killed = is_killed
 
     def update_usage_info(self, *args, **kwargs) -> None:
-        kwargs["is_blocking"] = kwargs.get("is_blocking", self.is_blocking)
         if self.is_lhs_ref:
             kwargs["exclude_ns"] = True
         self.sym.update_usage_info(*args, **kwargs)
@@ -75,33 +74,6 @@ class ResolvedSymbol(CommonEqualityMixin):
         return self.next_atom is None
 
     @property
-    def is_cascading_reactive(self):
-        return self.atom.is_cascading_reactive or (
-            self.is_live
-            and self.sym.is_cascading_reactive_at_counter(
-                self.liveness_timestamp.cell_num
-            )
-        )
-
-    @property
-    def is_reactive(self) -> bool:
-        if self.is_blocking:
-            return False
-        return (
-            (self.atom.is_reactive and not self.is_lhs_ref)
-            or self.is_cascading_reactive
-            or (self.is_live and flow().is_updated_deep_reactive(self.sym))
-        )
-
-    @property
-    def is_blocking(self) -> bool:
-        return self.atom.is_blocking or (
-            self.is_live
-            and flow().blocked_reactive_timestamps_by_symbol.get(self.sym, -1)
-            >= self.sym.timestamp.cell_num
-        )
-
-    @property
     def is_dead(self) -> bool:
         return self.liveness_timestamp is None or self.is_killed
 
@@ -115,8 +87,6 @@ class ResolvedSymbol(CommonEqualityMixin):
         assert self.is_live
         if self.is_lhs_ref:
             return False
-        if self.is_reactive:
-            return True
         if self.next_atom is None:
             return True
         elif not self.next_atom.is_callpoint:
@@ -155,9 +125,9 @@ class ResolvedSymbol(CommonEqualityMixin):
         if self.next_atom is None:
             return False
         if self.next_atom.is_callpoint:
-            if self.is_mutating and (
-                self.is_reactive
-                or flow().mut_settings.exec_mode == ExecutionMode.REACTIVE
+            if (
+                self.is_mutating
+                and flow().mut_settings.exec_mode == ExecutionMode.REACTIVE
             ):
                 return True
             else:

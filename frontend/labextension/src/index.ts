@@ -169,7 +169,6 @@ const extension: JupyterFrontEndPlugin<void> = {
         true,
         isBackward
       );
-      state.numPendingForcedReactiveCounterBumps++;
       if (state.settings.exec_mode === 'lazy') {
         state.executeCells(closure);
       } else {
@@ -871,19 +870,10 @@ const connectToComm = (
       debouncedSave();
       state.waitingCells = new Set(payload.waiting_cells as string[]);
       state.readyCells = new Set(payload.ready_cells as string[]);
-      if (state.numPendingForcedReactiveCounterBumps === 0) {
-        state.forcedReactiveCells = new Set([
-          ...state.forcedReactiveCells,
-          ...(payload.forced_reactive_cells as string[]),
-        ]);
-        state.forcedCascadingReactiveCells = new Set([
-          ...state.forcedCascadingReactiveCells,
-          ...(payload.forced_cascading_reactive_cells as string[]),
-        ]);
-      } else {
-        state.forcedReactiveCells = new Set();
-        state.forcedCascadingReactiveCells = new Set();
-      }
+      state.forcedReactiveCells = new Set([
+        ...state.forcedReactiveCells,
+        ...(payload.forced_reactive_cells as string[]),
+      ]);
       state.waiterLinks = payload.waiter_links as { [id: string]: string[] };
       state.readyMakerLinks = payload.ready_maker_links as {
         [id: string]: string[];
@@ -933,13 +923,6 @@ const connectToComm = (
       if (last_execution_was_error) {
         doneReactivelyExecuting = true;
       } else if (state.settings.reactivity_mode === 'batch') {
-        const cascadingReactiveCellIds = state
-          .computeTransitiveClosure(
-            Array.from(state.forcedCascadingReactiveCells).filter(
-              (id) => !state.executedReactiveReadyCells.has(id)
-            )
-          )
-          .map((cell) => cell.model.id);
         let reactiveCells: Array<Cell<ICellModel>>;
         if (exec_mode === 'reactive') {
           reactiveCells = state
@@ -947,7 +930,6 @@ const connectToComm = (
               [
                 ...state.newReadyCells,
                 ...state.forcedReactiveCells,
-                ...cascadingReactiveCellIds,
               ].filter((id) => !state.executedReactiveReadyCells.has(id))
             )
             .filter(
@@ -956,7 +938,6 @@ const connectToComm = (
         } else {
           reactiveCells = [
             ...state.forcedReactiveCells,
-            ...cascadingReactiveCellIds,
           ]
             .filter(
               (id) =>
@@ -1037,11 +1018,7 @@ const connectToComm = (
         if (state.numAltModeExecutes > 0 && --state.numAltModeExecutes === 0 && state.settings.reactivity_mode === 'incremental') {
           state.toggleReactivity();
         }
-        if (state.numPendingForcedReactiveCounterBumps > 0) {
-          state.bumpForcedReactiveCounter();
-        }
         state.forcedReactiveCells = new Set();
-        state.forcedCascadingReactiveCells = new Set();
         state.newReadyCells = new Set();
         state.executedReactiveReadyCells = new Set();
         state.isReactivelyExecuting = false;

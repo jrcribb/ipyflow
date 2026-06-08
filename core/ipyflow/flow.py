@@ -191,12 +191,7 @@ class NotebookFlow(singletons.NotebookFlow):
         self.virtual_symbols: Scope = Scope()
         self._virtual_symbols_inited: bool = False
         self.updated_symbols: Set[Symbol] = set()
-        self.updated_reactive_symbols: Set[Symbol] = set()
-        self.updated_deep_reactive_symbols: Set[Symbol] = set()
-        self.updated_reactive_symbols_last_cell: Set[Symbol] = set()
-        self.updated_deep_reactive_symbols_last_cell: Set[Symbol] = set()
         self.active_watchpoints: List[Tuple[Tuple[Watchpoint, ...], Symbol]] = []
-        self.blocked_reactive_timestamps_by_symbol: Dict[Symbol, int] = {}
         self.statement_to_func_sym: Dict[int, Symbol] = {}
         self.active_cell_id: Optional[IdType] = None
         self.waiter_usage_detected = False
@@ -208,7 +203,6 @@ class NotebookFlow(singletons.NotebookFlow):
         self.exception_counter: int = 0
         self._saved_debug_message: Optional[str] = None
         self.min_timestamp = -1
-        self.min_cascading_reactive_cell_num = -1
         self._tags: Tuple[str, ...] = ()
         self.last_executed_content: Optional[str] = None
         self.last_executed_cell_id: Optional[IdType] = None
@@ -221,7 +215,6 @@ class NotebookFlow(singletons.NotebookFlow):
         self._prev_cell_metadata_by_id: Optional[Dict[IdType, Dict[str, Any]]] = None
         self._prev_order_idx_by_id: Optional[Dict[IdType, int]] = None
         self._min_new_ready_cell_counter = -1
-        self._min_forced_reactive_cell_counter = -1
         compile_handlers_for_already_imported_modules({"ipyflow"})
 
     def register_comm_target(self, kernel: IPythonKernel) -> None:
@@ -406,15 +399,6 @@ class NotebookFlow(singletons.NotebookFlow):
             self._min_new_ready_cell_counter, self.cell_counter(), self.min_timestamp
         )
 
-    def min_forced_reactive_cell_counter(self) -> int:
-        return max(
-            self._min_forced_reactive_cell_counter,
-            self.min_timestamp,
-        )
-
-    def bump_min_forced_reactive_counter(self) -> None:
-        self._min_forced_reactive_cell_counter = self.cell_counter()
-
     @contextmanager
     def override_child_cell(self, cell: Cell) -> Generator[None, None, None]:
         orig_override = self._override_child_cell
@@ -449,18 +433,6 @@ class NotebookFlow(singletons.NotebookFlow):
             self.stmt_deferred_static_parents.setdefault(child, {}).setdefault(
                 parent, set()
             ).add(sym)
-
-    def is_updated_reactive(self, sym: Symbol) -> bool:
-        return (
-            sym in self.updated_reactive_symbols
-            or sym in self.updated_reactive_symbols_last_cell
-        )
-
-    def is_updated_deep_reactive(self, sym: Symbol) -> bool:
-        return (
-            sym in self.updated_deep_reactive_symbols
-            or sym in self.updated_deep_reactive_symbols_last_cell
-        )
 
     def reset_cell_counter(self):
         # only called in test context
@@ -541,36 +513,27 @@ class NotebookFlow(singletons.NotebookFlow):
         cells_to_check: Optional[Iterable[Cell]] = None,
         update_liveness_time_versions: bool = False,
         last_executed_cell_id: Optional[IdType] = None,
-        clear_updated_reactive_symbols: bool = False,
         allow_new_ready: bool = True,
     ) -> FrontendCheckerResult:
         result = FrontendCheckerResult.empty(allow_new_ready=allow_new_ready)
-        try:
-            if (
-                DataflowTracer not in singletons.shell().registered_tracers
-                or not DataflowTracer.initialized()
-            ):
-                return result
-            return result.compute_frontend_checker_result(
-                cells_to_check=cells_to_check,
-                update_liveness_time_versions=update_liveness_time_versions,
-                last_executed_cell_id=last_executed_cell_id,
-            )
-        finally:
-            if clear_updated_reactive_symbols:
-                self.updated_reactive_symbols_last_cell.clear()
-                self.updated_deep_reactive_symbols_last_cell.clear()
+        if (
+            DataflowTracer not in singletons.shell().registered_tracers
+            or not DataflowTracer.initialized()
+        ):
+            return result
+        return result.compute_frontend_checker_result(
+            cells_to_check=cells_to_check,
+            update_liveness_time_versions=update_liveness_time_versions,
+            last_executed_cell_id=last_executed_cell_id,
+        )
 
-    def _safety_precheck_cell(
-        self, cell: Cell, clear_updated_reactive_symbols: bool = True
-    ) -> None:
+    def _safety_precheck_cell(self, cell: Cell) -> None:
         for tracer in singletons.shell().registered_tracers:
             # just make sure all tracers are initialized
             tracer.instance()
         checker_result = self.check_and_link_multiple_cells(
             cells_to_check=[cell],
             update_liveness_time_versions=self.mut_settings.static_slicing_enabled,
-            clear_updated_reactive_symbols=clear_updated_reactive_symbols,
         )
         if cell.cell_id in checker_result.waiting_cells:
             self.waiter_usage_detected = True

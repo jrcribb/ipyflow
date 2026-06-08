@@ -153,7 +153,6 @@ class Symbol:
         self._snapshot_timestamp_ubounds: List[Timestamp] = []
         self._defined_cell_num = cells().exec_counter()
         self._is_dangling_on_edges = False
-        self._cascading_reactive_cell_num = -1
         self._override_ready_liveness_cell_num = -1
         self._override_timestamp: Optional[Timestamp] = None
         self.watchpoints = Watchpoints()
@@ -371,38 +370,6 @@ class Symbol:
             format_type=format_type,
         )
 
-    def cascading_reactive_cell_num(
-        self,
-        seen: Optional[Set["Symbol"]] = None,
-        consider_containing_symbols: bool = True,
-    ) -> int:
-        if seen is None:
-            seen = set()
-        if self in seen:
-            return -1
-        seen.add(self)
-        cell_num = self._cascading_reactive_cell_num
-        ns = self.namespace
-        ret = (
-            cell_num
-            if ns is None
-            else max(
-                cell_num,
-                ns.max_cascading_reactive_cell_num(seen),
-            )
-        )
-        if not consider_containing_symbols:
-            return ret
-        for sym in self.iter_containing_symbols():
-            ret = max(ret, sym.cascading_reactive_cell_num(seen=seen))
-        return ret
-
-    def bump_cascading_reactive_cell_num(self, ctr: Optional[int] = None) -> None:
-        self._cascading_reactive_cell_num = max(
-            self._cascading_reactive_cell_num,
-            flow().cell_counter() if ctr is None else ctr,
-        )
-
     def iter_containing_symbols(self) -> Generator["Symbol", None, None]:
         yield self
         ns = self.containing_namespace
@@ -498,11 +465,6 @@ class Symbol:
                 if self.stmt_node is None
                 else ast.dump(self.stmt_node)
             )
-
-    def is_cascading_reactive_at_counter(self, ctr: int) -> bool:
-        return self.cascading_reactive_cell_num() > max(
-            ctr, flow().min_cascading_reactive_cell_num
-        )
 
     def get_top_level(self) -> Optional["Symbol"]:
         if not self.containing_scope.is_namespace_scope:
@@ -681,7 +643,6 @@ class Symbol:
 
     def collect_self_garbage(self) -> None:
         assert self.is_garbage
-        flow().blocked_reactive_timestamps_by_symbol.pop(self, None)
         self._remove_self_from_aliases()
         for parent in self.parents:
             parent.children.pop(self, None)
@@ -777,11 +738,6 @@ class Symbol:
 
     def _should_cancel_propagation(self, prev_obj: Optional[Any]) -> bool:
         if prev_obj is None:
-            return False
-        if (
-            flow().blocked_reactive_timestamps_by_symbol.get(self, -1)
-            == self.timestamp.cell_num
-        ):
             return False
         if not self._cached_out_of_sync or self.obj_id == self.cached_obj_id:
             return True
@@ -1026,9 +982,7 @@ class Symbol:
         propagate_to_namespace_descendents: bool = False,
         propagate: bool = True,
         refresh: bool = True,
-        is_cascading_reactive: Optional[bool] = None,
     ) -> None:
-        flow_ = flow()
         if self.is_import and self.obj_id == self.cached_obj_id:
             # skip updates for imported symbols; just bump the version
             self.refresh()
@@ -1080,21 +1034,6 @@ class Symbol:
         propagate = propagate and (
             mutated or deleted or not self._should_cancel_propagation(prev_obj)
         )
-        try:
-            prev_cell = cells().current_cell().prev_cell
-        except KeyError:
-            prev_cell = None
-        prev_cell_ctr = -1 if prev_cell is None else prev_cell.cell_ctr
-        if overwrite:
-            self._cascading_reactive_cell_num = -1
-            flow_.updated_reactive_symbols.discard(self)
-            flow_.updated_deep_reactive_symbols.discard(self)
-        if is_cascading_reactive is not None:
-            is_cascading_reactive = is_cascading_reactive or any(
-                sym.is_cascading_reactive_at_counter(prev_cell_ctr) for sym in new_deps
-            )
-        if is_cascading_reactive:
-            self.bump_cascading_reactive_cell_num()
         if refresh:
             self.refresh(
                 # rationale: if this is a mutation for which we have more precise information,
@@ -1262,9 +1201,7 @@ class Symbol:
         used_node: Optional[ast.AST] = None,
         exclude_ns: bool = False,
         is_static: bool = False,
-        is_blocking: bool = False,
     ) -> "Symbol":
-        is_blocking = is_blocking or id(used_node) in tracer().blocking_node_ids
         if used_time is None:
             used_time = Timestamp.current()
         if flow().is_dev_mode:
@@ -1279,23 +1216,22 @@ class Symbol:
             if is_static
             else self.timestamp_by_used_time
         )
-        if not is_blocking:
-            is_usage = False
-            ts_to_use = self._initialized_timestamp
-            for updated_ts in sorted(self.updated_timestamps, reverse=True):
-                if not updated_ts.is_initialized:
-                    continue
-                is_usage = self.update_usage_info_one_timestamp(
-                    used_time,
-                    updated_ts,
-                    is_static=is_static,
-                )
-                if is_usage or not is_static:
-                    break
-            if is_usage and used_time.is_initialized:
-                timestamp_by_used_time[used_time] = ts_to_use
-                if used_node is not None:
-                    self.used_node_by_used_time[used_time] = used_node
+        is_usage = False
+        ts_to_use = self._initialized_timestamp
+        for updated_ts in sorted(self.updated_timestamps, reverse=True):
+            if not updated_ts.is_initialized:
+                continue
+            is_usage = self.update_usage_info_one_timestamp(
+                used_time,
+                updated_ts,
+                is_static=is_static,
+            )
+            if is_usage or not is_static:
+                break
+        if is_usage and used_time.is_initialized:
+            timestamp_by_used_time[used_time] = ts_to_use
+            if used_node is not None:
+                self.used_node_by_used_time[used_time] = used_node
         if exclude_ns:
             return self
         for sym in self.get_namespace_symbols(recurse=True):
@@ -1304,7 +1240,6 @@ class Symbol:
                 used_node=None,
                 exclude_ns=True,
                 is_static=is_static,
-                is_blocking=is_blocking,
             )
         return self
 

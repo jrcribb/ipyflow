@@ -360,10 +360,7 @@ class CommManager:
 
     def handle_reactivity_cleanup(self, _request=None) -> None:
         """Handle reactivity cleanup request."""
-        self.flow.min_cascading_reactive_cell_num = self.flow.cell_counter()
         self.flow._min_new_ready_cell_counter = self.flow.cell_counter() + 1
-        self.flow.updated_reactive_symbols.clear()
-        self.flow.updated_deep_reactive_symbols.clear()
 
     def handle_refresh_symbols(self, request) -> None:
         """Handle refresh symbols request."""

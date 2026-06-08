@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Type, Union, cast
 
 import pyccolo as pyc
 
-from ipyflow.analysis.live_refs import stmt_contains_cascading_reactive_rval
 from ipyflow.analysis.symbol_edges import get_symbol_edges
-from ipyflow.analysis.symbol_ref import SymbolRef
 from ipyflow.analysis.utils import stmt_contains_lval
 from ipyflow.data_model import DUPED_ATTRSUB_CLASSES
 from ipyflow.data_model.namespace import Namespace
@@ -66,7 +64,6 @@ class Statement(SliceableMixin):
         self.class_scope: Optional[Scope] = None
         self.lambda_call_point_deps_done_once = False
         self.node_id_for_last_call: Optional[int] = None
-        self._stmt_contains_cascading_reactive_rval: Optional[bool] = None
         self.raw_dynamic_parents: Dict[IdType, Set[Symbol]] = {}
         self.raw_dynamic_children: Dict[IdType, Set[Symbol]] = {}
         self.raw_static_parents: Dict[IdType, Set[Symbol]] = {}
@@ -249,14 +246,6 @@ class Statement(SliceableMixin):
     def to_function(self, *args, **kwargs):
         return self.code().to_function(*args, **kwargs)
 
-    @property
-    def stmt_contains_cascading_reactive_rval(self) -> bool:
-        if self._stmt_contains_cascading_reactive_rval is None:
-            self._stmt_contains_cascading_reactive_rval = (
-                stmt_contains_cascading_reactive_rval(self.stmt_node)
-            )
-        return self._stmt_contains_cascading_reactive_rval
-
     def _contains_lval(self) -> bool:
         return stmt_contains_lval(self.stmt_node)
 
@@ -301,43 +290,6 @@ class Statement(SliceableMixin):
             func_sym.call_scope = new_call_scope
             func_sym.create_symbols_for_call_args(call_frame)
         return func_sym.call_scope
-
-    @staticmethod
-    def _handle_reactive_store(target: ast.AST) -> None:
-        try:
-            symbol_ref = SymbolRef(target)
-            reactive_seen = False
-            blocking_seen = False
-            for resolved in symbol_ref.gen_resolved_symbols(
-                tracer().cur_frame_original_scope,
-                only_yield_final_symbol=False,
-                yield_all_intermediate_symbols=True,
-                inherit_reactivity=False,
-                yield_in_reverse=True,
-            ):
-                if resolved.is_blocking:
-                    blocking_seen = True
-                if resolved.is_reactive and not blocking_seen:
-                    if resolved.is_cascading_reactive:
-                        flow().updated_deep_reactive_symbols.add(resolved.sym)
-                    else:
-                        flow().updated_deep_reactive_symbols_last_cell.add(resolved.sym)
-                    reactive_seen = True
-                    if not resolved.is_live and resolved.atom.is_cascading_reactive:
-                        resolved.sym.bump_cascading_reactive_cell_num()
-                    if resolved.is_last:
-                        resolved.sym.refresh()
-                if reactive_seen and not blocking_seen:
-                    if resolved.is_cascading_reactive:
-                        flow().updated_reactive_symbols.add(resolved.sym)
-                    else:
-                        flow().updated_reactive_symbols_last_cell.add(resolved.sym)
-                if blocking_seen and resolved.sym not in flow().updated_symbols:
-                    flow().blocked_reactive_timestamps_by_symbol[
-                        resolved.sym
-                    ] = flow().cell_counter()
-        except TypeError:
-            return
 
     def _handle_assign_target_for_deps(
         self,
@@ -406,7 +358,6 @@ class Statement(SliceableMixin):
                 self.stmt_node,
                 is_subscript=subscript_val,
                 symbol_node=target,
-                is_cascading_reactive=self.stmt_contains_cascading_reactive_rval,
             )
             logger.info(
                 "sym %s upserted to scope %s has parents %s",
@@ -414,7 +365,6 @@ class Statement(SliceableMixin):
                 scope,
                 upserted.parents,
             )
-        self._handle_reactive_store(target)
         if maybe_fixup_literal_namespace:
             namespace_for_upsert = flow().namespaces.get(id(obj), None)
             if namespace_for_upsert is not None and namespace_for_upsert.is_anonymous:
@@ -462,7 +412,6 @@ class Statement(SliceableMixin):
                 {inner_dep},
                 self.stmt_node,
                 is_subscript=True,
-                is_cascading_reactive=self.stmt_contains_cascading_reactive_rval,
             )
         sym = scope.upsert_symbol_for_name(
             name,
@@ -471,11 +420,9 @@ class Statement(SliceableMixin):
             self.stmt_node,
             is_subscript=is_subscript,
             symbol_node=target,
-            is_cascading_reactive=self.stmt_contains_cascading_reactive_rval,
         )
         if ns_was_none and ns is not None:
             ns.original_symbol = sym
-        self._handle_reactive_store(target.value)
 
     def _handle_store_target_tuple_unpack_from_namespace(
         self,
@@ -663,21 +610,7 @@ class Statement(SliceableMixin):
                     class_scope=self.class_scope,
                     propagate=not isinstance(self.stmt_node, (ast.For, ast.AsyncFor)),
                     symbol_node=target if isinstance(target, ast.AST) else None,
-                    is_cascading_reactive=self.stmt_contains_cascading_reactive_rval,
                 )
-                if isinstance(
-                    self.stmt_node,
-                    (
-                        ast.FunctionDef,
-                        ast.ClassDef,
-                        ast.AsyncFunctionDef,
-                        ast.Import,
-                        ast.ImportFrom,
-                    ),
-                ):
-                    self._handle_reactive_store(self.stmt_node)
-                elif isinstance(target, ast.AST):
-                    self._handle_reactive_store(target)
             except KeyError:
                 # e.g., slices aren't implemented yet
                 # put logging behind flag to avoid noise to user

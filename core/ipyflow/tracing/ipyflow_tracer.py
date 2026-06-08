@@ -147,16 +147,6 @@ class DataflowTracer(StackFrameManager):
     ast_rewriter_cls = DataflowAstRewriter
     should_patch_meta_path = True
 
-    blocking_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.prefix, token="$:", replacement=""
-    )
-    cascading_reactive_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.prefix, token="$$", replacement=""
-    )
-    reactive_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.prefix, token="$", replacement=""
-    )
-
     def should_propagate_handler_exception(
         self, evt: pyc.TraceEvent, exc: Exception
     ) -> bool:
@@ -165,16 +155,6 @@ class DataflowTracer(StackFrameManager):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._tracing_enabled_files.discard(self.defined_file)
-        with self.persistent_fields():
-            self.reactive_node_ids: Set[int] = self.augmented_node_ids_by_spec[
-                self.reactive_spec
-            ]
-            self.cascading_reactive_node_ids: Set[int] = (
-                self.augmented_node_ids_by_spec[self.cascading_reactive_spec]
-            )
-            self.blocking_node_ids: Set[int] = self.augmented_node_ids_by_spec[
-                self.blocking_spec
-            ]
         self.tracing_disabled_since_last_stmt = False
         self.tracing_disabled_since_last_module_stmt = False
         self.guards_pending_deactivation: Set[str] = set()
@@ -1791,8 +1771,3 @@ class DataflowTracer(StackFrameManager):
         trace_stmt = self._get_or_make_trace_stmt(stmt_node, frame)
         self._maybe_log_event(event, stmt_node, trace_stmt)
         self.state_transition_hook(event, trace_stmt, frame, ret_obj)
-
-
-reactive_spec = DataflowTracer.reactive_spec
-cascading_reactive_spec = DataflowTracer.cascading_reactive_spec
-blocking_spec = DataflowTracer.blocking_spec

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import functools
 import logging
-import sys
 import textwrap
 from test.utils import make_flow_fixture
 from typing import Dict
@@ -665,25 +664,3 @@ def test_namespace_contributions():
     assert deps == {1, 2, 3, 4, 5, 6}, "got %s" % deps
     slice_size = num_stmts_in_slice(6)
     assert slice_size == len(deps), "got %d" % slice_size
-
-
-if sys.version_info >= (3, 8):
-
-    def test_slice_with_reactive_modifiers():
-        run_cell("x = 0")
-        run_cell("y = $x + 1")
-        run_cell("logging.info($y)")
-        slice_text = str(format_slice(compute_unparsed_slice_stmts(3), blacken=True))
-        expected = textwrap.dedent(
-            """
-            # Cell 1
-            x = 0
-            
-            # Cell 2
-            y = x + 1
-
-            # Cell 3
-            logging.info(y)
-            """
-        ).strip()
-        assert slice_text == expected, "got %s instead of %s" % (slice_text, expected)

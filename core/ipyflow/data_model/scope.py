@@ -296,7 +296,6 @@ class Scope:
         symbol_type: Optional[SymbolType] = None,
         propagate: bool = True,
         implicit: bool = False,
-        is_cascading_reactive: Optional[bool] = None,
     ) -> Symbol:
         symbol_type = symbol_type or self._resolve_symbol_type(
             obj=obj,
@@ -326,7 +325,6 @@ class Scope:
             overwrite=overwrite,
             propagate=propagate,
             refresh=not implicit,
-            is_cascading_reactive=is_cascading_reactive,
         )
         if (
             prev_sym is None

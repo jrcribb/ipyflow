@@ -182,17 +182,6 @@ class Namespace(Scope):
         else:
             return sym.is_subscript
 
-    def max_cascading_reactive_cell_num(self, seen: Set[Symbol]) -> int:
-        return max(
-            (
-                sym.cascading_reactive_cell_num(
-                    seen=seen, consider_containing_symbols=False
-                )
-                for sym in self.all_symbols_this_indentation()
-            ),
-            default=-1,
-        )
-
     def update_obj_ref(self, obj) -> None:
         self._tombstone = False
         flow().namespaces.pop(self.cached_obj_id, None)

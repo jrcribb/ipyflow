@@ -26,7 +26,7 @@ from ipyflow.analysis.resolved_symbols import ResolvedSymbol
 from ipyflow.analysis.symbol_ref import Atom, LiveSymbolRef, SymbolRef, visit_stack
 from ipyflow.config import FlowDirection
 from ipyflow.data_model.timestamp import Timestamp
-from ipyflow.singletons import flow, tracer
+from ipyflow.singletons import flow
 
 if TYPE_CHECKING:
     from ipyflow.data_model.scope import Scope
@@ -126,7 +126,7 @@ class ComputeLiveSymbolRefs(
         leading_atom = ref.chain[0]
         if isinstance(leading_atom.value, str):
             is_killed = is_killed or (
-                SymbolRef(leading_atom.nonreactive(), scope=self._scope) in self.dead
+                SymbolRef(leading_atom, scope=self._scope) in self.dead
                 or SymbolRef(
                     Atom(leading_atom.value, is_callpoint=False), scope=self._scope
                 )
@@ -286,8 +286,6 @@ class ComputeLiveSymbolRefs(
             is_killed = ref in self.dead
             if is_killed and not self._include_killed_live:
                 return
-            if id(node) in tracer().reactive_node_ids:
-                ref.chain[0].is_reactive = True
             self.live.add(
                 LiveSymbolRef(
                     ref,
@@ -626,14 +624,6 @@ def _compute_call_chain_live_symbols_and_cells(
                     and resolved.sym.shallow_timestamp.cell_num != cell_ctr
                 ):
                     continue
-                # FIXME: kind of hacky
-                resolved.atom.is_cascading_reactive = (
-                    resolved.atom.is_cascading_reactive
-                    or called_sym.is_cascading_reactive
-                )
-                resolved.atom.is_reactive = (
-                    resolved.atom.is_reactive or called_sym.is_reactive
-                )
                 did_resolve = True
                 if resolved.is_called:
                     worklist.append((resolved, stmt_ctr))
@@ -692,12 +682,3 @@ def static_resolve_rvals(
         live_refs, scope or flow().global_scope, cell_ctr=cell_ctr
     )
     return resolved_live_syms
-
-
-def stmt_contains_cascading_reactive_rval(stmt: ast.stmt) -> bool:
-    live_refs, *_ = compute_live_dead_symbol_refs(stmt)
-    for ref in live_refs:
-        for atom in ref.ref.chain:
-            if atom.is_cascading_reactive:
-                return True
-    return False

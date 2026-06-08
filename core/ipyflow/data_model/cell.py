@@ -704,8 +704,6 @@ class Cell(SliceableMixin):
     def get_max_used_live_symbol_cell_counter(
         self,
         live_symbols: Set[ResolvedSymbol],
-        filter_to_reactive: bool = False,
-        filter_to_cascading_reactive: bool = False,
         dead_symbols: Optional[Set["Symbol"]] = None,
     ) -> int:
         min_allowed_cell_position_by_symbol: Optional[Dict["Symbol", int]] = None
@@ -727,16 +725,6 @@ class Cell(SliceableMixin):
             max_used_cell_ctr = -1
             this_cell_pos = self.position
             for resolved in live_symbols:
-                if resolved.is_blocking:
-                    continue
-                if filter_to_cascading_reactive and not resolved.is_cascading_reactive:
-                    continue
-                if (
-                    filter_to_reactive
-                    and not resolved.is_reactive
-                    and not flow().is_updated_reactive(resolved.sym)
-                ):
-                    continue
                 live_sym_updated_cell_ctr = resolved.timestamp.cell_num
                 if (
                     live_sym_updated_cell_ctr

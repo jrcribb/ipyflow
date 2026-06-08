@@ -50,8 +50,6 @@ export class IpyflowSessionState {
   executedReactiveReadyCells: Set<string> = new Set();
   newReadyCells: Set<string> = new Set();
   forcedReactiveCells: Set<string> = new Set();
-  forcedCascadingReactiveCells: Set<string> = new Set();
-  numPendingForcedReactiveCounterBumps = 0;
   cellParents: { [id: string]: string[] } = {};
   cellChildren: { [id: string]: string[] } = {};
   settings: { [key: string]: string } = {};
@@ -132,18 +130,6 @@ export class IpyflowSessionState {
     }
     return this.session.session.kernel.requestExecute({
       code: '%flow toggle-reactivity',
-      silent: true,
-      store_history: false,
-    });
-  }
-
-  bumpForcedReactiveCounter(): IShellFuture<
-    KernelMessage.IExecuteRequestMsg,
-    KernelMessage.IExecuteReplyMsg
-  > {
-    this.numPendingForcedReactiveCounterBumps--;
-    return this.session.session.kernel.requestExecute({
-      code: '%flow bump-min-forced-reactive-counter',
       silent: true,
       store_history: false,
     });

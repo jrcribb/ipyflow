@@ -46,7 +46,6 @@ class FrontendCheckerResult(NamedTuple):
     ready_cells: Set[IdType]
     new_ready_cells: Set[IdType]
     forced_reactive_cells: Set[IdType]
-    forced_cascading_reactive_cells: Set[IdType]
     typecheck_error_cells: Set[IdType]
     unsafe_order_cells: Dict[IdType, Set[Cell]]
     unsafe_order_symbol_usage: Dict[IdType, List[Dict[str, Any]]]
@@ -67,7 +66,6 @@ class FrontendCheckerResult(NamedTuple):
             ready_cells=set(),
             new_ready_cells=set(),
             forced_reactive_cells=set(),
-            forced_cascading_reactive_cells=set(),
             typecheck_error_cells=set(),
             unsafe_order_cells=defaultdict(set),
             unsafe_order_symbol_usage=defaultdict(list),
@@ -98,9 +96,6 @@ class FrontendCheckerResult(NamedTuple):
                 list(self.new_ready_cells) if self.allow_new_ready else []
             ),
             "forced_reactive_cells": list(self.forced_reactive_cells),
-            "forced_cascading_reactive_cells": list(
-                self.forced_cascading_reactive_cells
-            ),
             "unsafe_order_cells": {
                 cell_id: [unsafe.cell_id for unsafe in unsafe_order_cells]
                 for cell_id, unsafe_order_cells in self.unsafe_order_cells.items()
@@ -193,37 +188,6 @@ class FrontendCheckerResult(NamedTuple):
             if last_executed_cell_id is not None:
                 ready_making_cell_ids.discard(last_executed_cell_id)
             self.waiter_links[waiting_cell_id] = ready_making_cell_ids
-
-    def _compute_reactive_cells_for_reactive_symbols(
-        self,
-        checker_results_by_cid: Dict[IdType, CheckerResult],
-        last_executed_cell_pos: int,
-    ) -> None:
-        flow_ = flow()
-        for cell_id in self.ready_cells:
-            if cell_id not in checker_results_by_cid:
-                continue
-            cell = cells().from_id(cell_id)
-            if (
-                flow_.mut_settings.flow_order == FlowDirection.IN_ORDER
-                and cell.position < last_executed_cell_pos
-            ):
-                # prevent this cell from being reactive if it appears before the last executed cell
-                continue
-            max_used_ctr = cell.get_max_used_live_symbol_cell_counter(
-                checker_results_by_cid[cell_id].live, filter_to_reactive=True
-            )
-            if max_used_ctr > max(
-                cell.cell_ctr, flow_.min_forced_reactive_cell_counter()
-            ):
-                self.forced_reactive_cells.add(cell_id)
-            max_used_ctr = cell.get_max_used_live_symbol_cell_counter(
-                checker_results_by_cid[cell_id].live, filter_to_cascading_reactive=True
-            )
-            if max_used_ctr > max(
-                cell.cell_ctr, flow_.min_forced_reactive_cell_counter()
-            ):
-                self.forced_cascading_reactive_cells.add(cell_id)
 
     def _compute_dag_based_waiters(self, cells_to_check: List[Cell]) -> None:
         flow_ = flow()
@@ -599,7 +563,6 @@ class FrontendCheckerResult(NamedTuple):
         waiting_symbols_by_cell_id: Dict[IdType, Set[Symbol]] = {}
         killing_cell_ids_for_symbol: Dict[Symbol, Set[IdType]] = defaultdict(set)
         phantom_cell_info: Dict[IdType, Dict[IdType, Set[int]]] = {}
-        checker_results_by_cid: Dict[IdType, CheckerResult] = {}
         last_executed_cell_pos = self._get_last_executed_pos_and_handle_reactive_tags(
             last_executed_cell_id
         )
@@ -607,7 +570,7 @@ class FrontendCheckerResult(NamedTuple):
             cells_to_check = cells().current_cells_for_each_id()
         cells_to_check = sorted(cells_to_check, key=lambda c: c.position)
         for cell in cells_to_check:
-            checker_result = self._check_one_cell(
+            self._check_one_cell(
                 cell,
                 update_liveness_time_versions,
                 last_executed_cell_pos,
@@ -615,14 +578,8 @@ class FrontendCheckerResult(NamedTuple):
                 killing_cell_ids_for_symbol,
                 phantom_cell_info,
             )
-            if checker_result is not None:
-                checker_results_by_cid[cell.cell_id] = checker_result
 
         self._compute_dag_based_waiters(cells_to_check)
-        if last_executed_cell_pos is not None:
-            self._compute_reactive_cells_for_reactive_symbols(
-                checker_results_by_cid, last_executed_cell_pos
-            )
         self._compute_ready_making_cells(
             waiting_symbols_by_cell_id,
             killing_cell_ids_for_symbol,
