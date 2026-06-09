@@ -263,7 +263,8 @@ class SliceableMixin(Protocol):
         return NotImplemented
 
     @classmethod
-    def from_id_nullable(cls, sid: IdType) -> Optional["SliceableMixin"]: ...
+    def from_id_nullable(cls, sid: IdType) -> Optional["SliceableMixin"]:
+        ...
 
     @property
     def timestamp(self) -> Timestamp:
