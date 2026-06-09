@@ -78,20 +78,26 @@ Features
 
 ### Reactive execution model
 
-IPyflow ships with extensions that bring reactivity to JupyterLab and Notebook
-7 by default, similar to execution behavior offered in other notebooks such as
+IPyflow ships with extensions that bring optional reactivity to JupyterLab and
+Notebook 7, similar to execution behavior offered in other notebooks such as
 [Observable](https://observablehq.com/),
 [Pluto.jl](https://github.com/fonsp/Pluto.jl), and
-[Marimo](https://github.com/marimo-team/marimo).
+[Marimo](https://github.com/marimo-team/marimo). Reactive execution is opt-in;
+by default, IPyflow uses normal (non-reactive) execution and only executes the
+cell you run, while still tracking dependencies in the background.
 
 IPyflow's reactivity behaves a little bit differently from the above, however,
-as it was designed to meet the needs of Jupyter users in particular. When you
-execute cell `C` with IPyflow, `C`'s output, the output of the cells `C`
-depends on, and the output of the cells that depend on `C` all appear as they
-would if the notebook were executed from top to bottom (e.g. via "restart and
-run-all"). When you select some cell `C`, all the cells that would re-execute
-when `C` is executed have an orange dot next to them, and cells that `C`
-depends on but that are up-to-date and will not re-execute have purple dots:
+as it was designed to meet the needs of Jupyter users in particular. Once
+reactive execution is enabled (see below), executing cell `C` with IPyflow
+causes `C`'s output, the output of the cells `C` depends on, and the output of
+the cells that depend on `C` to all appear as they would if the notebook were
+executed from top to bottom (e.g. via "restart and run-all").
+
+Regardless of whether reactive execution is enabled, IPyflow's JupyterLab
+extension color-codes cell dependencies: when you select some cell `C`, all the
+cells that would re-execute when `C` is executed have an orange dot next to
+them, and cells that `C` depends on but that are up-to-date and will not
+re-execute have purple dots:
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/ipyflow/ipyflow/master/img/ipyflow-dots.gif" width="400" />
@@ -130,31 +136,33 @@ Example:
 </p>
 
 
-### Opting out of reactivity
+### Opting into reactivity
 
-If you'd like to temporarily opt out of reactive execution, you can use
-ctrl+shift+enter (on Mac, cmd+shift+enter also works) to only execute the cell in question:
+By default, IPyflow uses normal (non-reactive) execution and only runs the cell
+you execute. If you'd like to reactively execute a single cell along with its
+dependents without changing the default mode, you can use ctrl+shift+enter (on
+Mac, cmd+shift+enter also works):
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/ipyflow/ipyflow/master/img/alt-mode-execute.gif" />
 </p>
 
-You can also run the magic command `%flow mode lazy` in opt out of the
-default reactive execution mode (in which case, ctr+shift+enter /
-cmd+shift+enter will switch from being nonreactive to reactive). To reenable
-reactive execution as the default, you can run `%flow mode reactive`:
+You can also run the magic command `%flow mode reactive` to make reactive
+execution the default (in which case, ctrl+shift+enter / cmd+shift+enter will
+switch from being reactive to nonreactive). To switch back to the default,
+non-reactive behavior, you can run `%flow mode lazy`:
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/ipyflow/ipyflow/master/img/reactivity-opt-out.gif" />
 </p>
 
-If you'd like to prevent the default reactive behavior for every new kernel
+If you'd like reactive execution to be the default for every new kernel
 session, you can add this to your IPython profile (default location typically
 at `~/.ipython/profile_default/ipython_config.py`):
 
 ```python
 c = get_config()
-c.ipyflow.exec_mode = "lazy"  # defaults to "reactive"
+c.ipyflow.exec_mode = "reactive"  # defaults to "lazy"
 ```
 
 

@@ -13,8 +13,8 @@ class EnumWithDefault(Enum):
 
 
 class ExecutionMode(EnumWithDefault):
-    LAZY = "lazy"
-    REACTIVE = __default__ = "reactive"  # type: ignore
+    LAZY = __default__ = "lazy"  # type: ignore
+    REACTIVE = "reactive"
 
 
 class ExecutionSchedule(EnumWithDefault):
