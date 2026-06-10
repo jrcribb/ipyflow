@@ -54,6 +54,16 @@ async function cellLocator(page: any, index: number) {
   return nb.locator('.jp-Cell').nth(index);
 }
 
+/**
+ * After each schedule, ipyflow persists its dependency graph via a 200ms-
+ * debounced notebook save. Galata deletes each test's temp directory on
+ * teardown, so a save that fires mid-teardown 500s ("File Save Error"). Let the
+ * debounced save flush while the notebook still exists before the test ends.
+ */
+async function settleAutosave(page: any): Promise<void> {
+  await page.waitForTimeout(1000);
+}
+
 test.describe('ipyflow extension', () => {
   test('establishes the ipyflow comm on the ipyflow kernel', async ({
     page
@@ -90,6 +100,8 @@ test.describe('ipyflow extension', () => {
       /(ready-cell|ready-making-cell|waiting-cell)/,
       { timeout: 30_000 }
     );
+
+    await settleAutosave(page);
   });
 
   test('reactively re-executes a dependent cell', async ({ page }) => {
@@ -143,5 +155,7 @@ test.describe('ipyflow extension', () => {
         message: 'dependent cell was not reactively re-executed'
       })
       .toBeGreaterThan(before as number);
+
+    await settleAutosave(page);
   });
 });
