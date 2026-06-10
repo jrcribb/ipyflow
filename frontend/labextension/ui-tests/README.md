@@ -25,18 +25,22 @@ jupyter kernelspec list     # ipyflow
 
 ```bash
 cd frontend/labextension/ui-tests
-jlpm install
-jlpm playwright install chromium   # first time only
-jlpm test                          # or: make uitest (from repo root)
+npm install
+npm run install-browser            # first time only (downloads chromium)
+npm test                           # or: make uitest (from repo root)
 ```
 
-Useful variants:
+Useful variants (run from this directory):
 
 ```bash
-jlpm playwright test --headed   # watch the browser drive JupyterLab
-jlpm test:debug                 # Playwright inspector
-jlpm test:report                # open the last HTML report
+npx playwright test --headed   # watch the browser drive JupyterLab
+npm run test:debug             # Playwright inspector
+npm run test:report            # open the last HTML report (./playwright-report)
 ```
+
+Note: the HTML report and other artifacts are written under
+`frontend/labextension/ui-tests/` (not the repo root), so run
+`npm run test:report` / `npx playwright show-report` from this directory.
 
 Playwright launches its own JupyterLab via `jupyter_server_test_config.py` on a
 dedicated port (**8899** by default, override with `IPYFLOW_UITEST_PORT`) so it
