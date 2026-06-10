@@ -653,6 +653,96 @@ def test_anonymous_symbols_attached_on_fun_return_do_not_interfere():
     assert slice_text == expected, "got %s instead of %s" % (slice_text, expected)
 
 
+_ITER_MUTATION_SETUP = textwrap.dedent(
+    """
+    class Page:
+        def __init__(self):
+            self.data = 0
+        def merge_page(self, other):
+            self.data += 1
+
+    class Writer:
+        def __init__(self):
+            self.pages = [Page(), Page()]
+
+    merger = Writer()
+    reader = Writer()
+    """
+)
+
+
+def test_iter_mutation_propagates_to_iterated_object():
+    # https://github.com/ipyflow/ipyflow/issues/166
+    # Mutating the loop variable should bump the timestamp of the object we're
+    # iterating over, so that a downstream reader of `merger` depends on the loop.
+    run_cell(_ITER_MUTATION_SETUP)
+    run_cell("for page in merger.pages:\n    page.merge_page(None)")
+    run_cell("logging.info(merger)")
+    deps = set(compute_unparsed_slice(3).keys())
+    assert deps == {1, 2, 3}, "got %s" % deps
+
+
+def test_zip_iter_mutation_propagates_to_iterated_object():
+    # https://github.com/ipyflow/ipyflow/issues/166
+    # Same as above, but unpacking from a `zip(...)` -- the implicit iterator
+    # symbol aliasing is what links the unpacked `page` back to `merger`.
+    run_cell(_ITER_MUTATION_SETUP)
+    run_cell(
+        "for page, to_merge in zip(merger.pages, reader.pages):\n"
+        "    page.merge_page(to_merge)"
+    )
+    run_cell("logging.info(merger)")
+    deps = set(compute_unparsed_slice(3).keys())
+    assert deps == {1, 2, 3}, "got %s" % deps
+
+
+# Like `_ITER_MUTATION_SETUP`, but `pages` is a *property* that returns a fresh
+# list on each access -- mirroring pypdf's `PdfWriter.pages` / `PdfReader.pages`
+# from the issue. The property getter runs traced statements, which used to
+# clobber the bookkeeping `after_for_iter` relied on (and crash) for the
+# zip / enumerate forms.
+_ITER_MUTATION_PROPERTY_SETUP = textwrap.dedent(
+    """
+    class Page:
+        def __init__(self):
+            self.data = 0
+        def merge_page(self, other):
+            self.data += 1
+
+    class Writer:
+        def __init__(self):
+            self._pages = [Page(), Page()]
+        @property
+        def pages(self):
+            return list(self._pages)
+
+    merger = Writer()
+    reader = Writer()
+    """
+)
+
+
+def test_zip_iter_mutation_propagates_through_property():
+    # https://github.com/ipyflow/ipyflow/issues/166
+    run_cell(_ITER_MUTATION_PROPERTY_SETUP)
+    run_cell(
+        "for page, to_merge in zip(merger.pages, reader.pages):\n"
+        "    page.merge_page(to_merge)"
+    )
+    run_cell("logging.info(merger)")
+    deps = set(compute_unparsed_slice(3).keys())
+    assert deps == {1, 2, 3}, "got %s" % deps
+
+
+def test_enumerate_iter_mutation_propagates_through_property():
+    # https://github.com/ipyflow/ipyflow/issues/166
+    run_cell(_ITER_MUTATION_PROPERTY_SETUP)
+    run_cell("for i, page in enumerate(merger.pages):\n    page.merge_page(None)")
+    run_cell("logging.info(merger)")
+    deps = set(compute_unparsed_slice(3).keys())
+    assert deps == {1, 2, 3}, "got %s" % deps
+
+
 def test_namespace_contributions():
     run_cell("import pandas as pd")
     run_cell('df = pd.DataFrame({"a": [0,1], "b": [2., 3.]})')

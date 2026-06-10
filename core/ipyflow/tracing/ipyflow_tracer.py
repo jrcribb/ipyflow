@@ -1447,8 +1447,31 @@ class DataflowTracer(StackFrameManager):
 
         return tracing_decorator
 
+    def _resolve_for_iter_call_args(
+        self, node_id: NodeId
+    ) -> List[Tuple[Any, Set[Symbol]]]:
+        # The args of the zip / enumerate call we're iterating over are normally available as the most recent external
+        # call, but that bookkeeping can be clobbered when the iterables are themselves produced by traced calls (e.g.
+        # `zip(merger.pages, reader.pages)` where `.pages` is a property): the property getters' `return` statements
+        # fire `after_stmt_reset_hook`, which clears `external_calls` before we get here. In that case, fall back to
+        # statically resolving the call args from the iterable AST node so that aliasing still propagates mutations.
+        if self.external_calls:
+            return self.external_calls[-1].args
+        call_node = self.ast_node_by_id.get(node_id)
+        if not isinstance(call_node, ast.Call):
+            return []
+        args: List[Tuple[Any, Set[Symbol]]] = []
+        for arg_node in call_node.args:
+            if isinstance(arg_node, ast.Starred):
+                # can't statically line up a starred arg with iterator positions; bail out
+                return []
+            arg_syms = resolve_rval_symbols(arg_node, should_update_usage_info=False)
+            arg_obj = next((sym.obj for sym in arg_syms), None)
+            args.append((arg_obj, arg_syms))
+        return args
+
     @pyc.register_raw_handler(pyc.after_for_iter)
-    def after_for_iter(self, ret: Any, *_, **__) -> None:
+    def after_for_iter(self, ret: Any, node_id: NodeId, *_, **__) -> None:
         # A for loop is kind of like an assignment, so save off the iterable as if it where the RHS of one. We'll use it
         # later to either unpack individual zip / enumerate iterators from the anonymous namespace created below, or as
         # a handle to look up potential existing symbols over which we're iterating, so that we can upsert an aliasing
@@ -1466,7 +1489,7 @@ class DataflowTracer(StackFrameManager):
         if isinstance(ret, enumerate):
             before_extra.append((0, set()))
         for i, (arg, arg_syms) in enumerate(
-            before_extra + self.external_calls[-1].args
+            before_extra + self._resolve_for_iter_call_args(node_id)
         ):
             ns.upsert_symbol_for_name(
                 i,
