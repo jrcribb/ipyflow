@@ -13,6 +13,7 @@ export default defineConfig([
       'coverage',
       '**/*.d.ts',
       'tests',
+      'ui-tests',
   ]),
   {
     plugins: {
