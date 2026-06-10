@@ -172,14 +172,31 @@ export function createNotebookEventHandlers(
   };
 
   const debouncedSave = debounce(() => {
-    const nbPanel = notebooks.currentWidget;
-    if ((nbPanel.model as any).collaborative ?? false) {
+    if (ctx.disconnected) {
+      return;
+    }
+    // Persist ipyflow metadata by saving *this connection's* notebook (not
+    // whatever happens to be focused), and only if it is still open. The save
+    // is debounced, so by the time it fires the notebook may have been closed
+    // (context disposed) or its file removed; calling context.save() then makes
+    // JupyterLab surface a "File Save Error" dialog itself, so guard first.
+    const nbPanel = notebooks.find((panel) => panel.content === notebook);
+    if (
+      nbPanel == null ||
+      nbPanel.isDisposed ||
+      nbPanel.context == null ||
+      nbPanel.context.isDisposed
+    ) {
+      return;
+    }
+    if ((nbPanel.context.model as any)?.collaborative ?? false) {
       return;
     } else if (docManager.autosave && docManager.autosaveInterval <= 5) {
       return;
-    } else {
-      nbPanel.context.save();
     }
+    // Still possible for the file to vanish between this check and the write;
+    // swallow that transient rejection rather than leaving it unhandled.
+    void nbPanel.context.save().catch((): void => undefined);
   }, 200);
 
   return {
