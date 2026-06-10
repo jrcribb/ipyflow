@@ -89,7 +89,10 @@ jobs:
     - name: Set up Node
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        # The labextension toolchain (npm-run-all2 9, typescript 6, eslint 10,
+        # vitest 4) requires node >= 22; node 20's npm hits the
+        # "Exit handler never called!" crash and silently skips the build.
+        node-version: '24'
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -97,6 +100,11 @@ jobs:
     - name: Build labextension, link it, and install the kernel
       run: |
         (cd frontend/labextension && npm install)
+        # npm can exit 0 even when the prepare/build step crashes (e.g. the
+        # "Exit handler never called!" bug), so verify the build output exists
+        # before continuing instead of failing much later at the sanity grep.
+        test -f core/ipyflow/resources/labextension/package.json
+        ls core/ipyflow/resources/labextension/static/remoteEntry.*.js
         cp frontend/labextension/install.json core/ipyflow/resources/labextension
         make extlink
         make kernel
