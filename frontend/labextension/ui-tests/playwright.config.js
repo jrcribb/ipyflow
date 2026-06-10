@@ -14,11 +14,17 @@ const baseConfig = require('@jupyterlab/galata/lib/playwright-config');
 const PORT = process.env.IPYFLOW_UITEST_PORT || '8899';
 const baseURL = `http://localhost:${PORT}`;
 
+// By default (galata) video/trace are kept only on failure. Set
+// IPYFLOW_UITEST_RECORD=1 (see `make uitest-record`) to capture a video + trace
+// for every test, pass or fail, for watching/debugging the run afterwards.
+const record = !!process.env.IPYFLOW_UITEST_RECORD;
+
 module.exports = {
   ...baseConfig,
   use: {
     ...baseConfig.use,
-    baseURL
+    baseURL,
+    ...(record ? { video: 'on', trace: 'on' } : {})
   },
   webServer: {
     command: 'jupyter lab --config jupyter_server_test_config.py',

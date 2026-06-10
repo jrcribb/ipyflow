@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-report e2e
+.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-record uitest-report e2e
 
 # Prefer uv if available, otherwise fall back to pip. Override with `make <t> PIP=...`.
 ifeq ($(shell command -v uv 2>/dev/null),)
@@ -88,7 +88,12 @@ dev: devdeps build extlink kernel
 uitest:
 	./scripts/runtests.sh ui
 
-# Open the HTML report from the last `make uitest` run (served on localhost).
+# Like `make uitest`, but record a video + trace for every test (pass or fail);
+# view them afterwards with `make uitest-report`.
+uitest-record:
+	IPYFLOW_UITEST_RECORD=1 ./scripts/runtests.sh ui
+
+# Open the HTML report from the last UI test run (served on localhost).
 uitest-report:
 	cd frontend/labextension/ui-tests && npm run test:report
 

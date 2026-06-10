@@ -42,6 +42,20 @@ Note: the HTML report and other artifacts are written under
 `frontend/labextension/ui-tests/` (not the repo root), so run
 `npm run test:report` / `npx playwright show-report` from this directory.
 
+### Recording video + trace
+
+By default video/trace are kept only for failing tests. To capture a video and a
+Playwright trace for **every** test (handy for watching the run or debugging a
+green build), use the dedicated target from the repo root and then open the
+report:
+
+```bash
+make uitest-record    # = make uitest, but with video + trace on for all tests
+make uitest-report    # view the videos/traces in the HTML report
+```
+
+(Equivalently: `IPYFLOW_UITEST_RECORD=1 npm test` from this directory.)
+
 Playwright launches its own JupyterLab via `jupyter_server_test_config.py` on a
 dedicated port (**8899** by default, override with `IPYFLOW_UITEST_PORT`) so it
 never collides with a JupyterLab you already have running on :8888. No manually
