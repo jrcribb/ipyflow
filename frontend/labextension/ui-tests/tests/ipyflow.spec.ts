@@ -7,17 +7,8 @@ import { expect, test } from '@jupyterlab/galata';
  * `window.ipyflow` (state/registry.ts) and read here via page.evaluate.
  */
 
-/** Create a notebook on the ipyflow kernel, populate `cells`, await the comm. */
-async function openIpyflowNotebook(page: any, cells: string[]): Promise<void> {
-  await page.notebook.createNew(undefined, { kernel: 'ipyflow' });
-  for (let i = 0; i < cells.length; i++) {
-    if (i === 0) {
-      await page.notebook.setCell(0, 'code', cells[0]);
-    } else {
-      await page.notebook.addCell('code', cells[i]);
-    }
-  }
-  // window.ipyflow is the live session store; comm connected => handshake done.
+/** Poll until the ipyflow comm has established (window.ipyflow is the store). */
+async function waitForComm(page: any): Promise<void> {
   await expect
     .poll(
       () =>
@@ -27,6 +18,23 @@ async function openIpyflowNotebook(page: any, cells: string[]): Promise<void> {
       { timeout: 60_000, message: 'ipyflow comm never connected' }
     )
     .toBe(true);
+}
+
+/** Create a notebook on the ipyflow kernel, populate `cells`, await the comm. */
+async function openIpyflowNotebook(page: any, cells: string[]): Promise<void> {
+  await page.notebook.createNew(undefined, { kernel: 'ipyflow' });
+  // Wait for the comm to establish on the fresh (empty) notebook BEFORE adding
+  // cells. The establish handler flips the notebook into windowed-scrollbar
+  // mode and re-renders; letting that happen concurrently with galata's cell
+  // construction races and can hang addCell (the cell DOM shifts underneath it).
+  await waitForComm(page);
+  for (let i = 0; i < cells.length; i++) {
+    if (i === 0) {
+      await page.notebook.setCell(0, 'code', cells[0]);
+    } else {
+      await page.notebook.addCell('code', cells[i]);
+    }
+  }
 }
 
 const readyAndWaitingCells = (page: any): Promise<string[]> =>
