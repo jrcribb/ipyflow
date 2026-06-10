@@ -100,6 +100,18 @@ export class IpyflowSessionStore implements IClosureContext {
     );
   }
 
+  /**
+   * Execute the given cells directly via `CodeCell.execute`, outside
+   * JupyterLab's normal run-cell command / `NotebookActions` path. This is how
+   * ipyflow performs reactive and closure-based execution (driven from the
+   * schedule handler and the run-cell patch).
+   *
+   * Implication for external tooling: because these runs do not go through the
+   * usual notebook execution flow, anything watching JupyterLab's standard
+   * cell-run signals will not observe them -- e.g. Galata's `page.notebook.run`
+   * / `runCell` (whose `waitForRun` never resolves for these). The UI e2e tests
+   * trigger reactive runs via a raw keypress and poll for the effect instead.
+   */
   executeCells(cells: Cell<ICellModel>[]): void {
     if (cells.length === 0) {
       return;
