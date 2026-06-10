@@ -5,6 +5,44 @@ tests that launch a real JupyterLab against the **ipyflow** kernel and exercise
 the extension's UI behavior (comm establishment, dependency-aware cell
 decoration, reactive re-execution).
 
+## Test files
+
+- `tests/helpers.ts` — shared plumbing (no tests). Reads ipyflow's per-session
+  store off `window.ipyflow` and drives JupyterLab via `window.jupyterapp`:
+  `waitForComm`, `openIpyflowNotebook`, `waitForEdge` / `cellChildrenIncludes`
+  (dependency graph), `execCount` / `cellOutputText` / `cellSource`,
+  `setCellSource`, `restartKernel`, `enableReactiveMode`, and
+  `attachNotebookDumpOnFailure` (attaches a JSON dump of every cell's
+  source/output/exec-count to the report when a test fails).
+- `tests/ipyflow.spec.ts` — comm establishment, dependency-aware ready
+  decoration, reactive re-execution.
+- `tests/hotkeys.spec.ts` — the ipyflow keybindings: forward slice
+  (`Accel+J` / `Accel+ArrowDown`), backward slice (`Accel+K` / `Accel+ArrowUp`),
+  alt-mode execute (`Ctrl/Accel+Shift+Enter`), and run-ready-cells (`Space`).
+  Each asserts the exact set of cells that (re)ran.
+- `tests/restart.spec.ts` — behavior across a kernel restart: the dependency
+  graph persists (via notebook metadata) and reactive re-execution still works
+  immediately after, and after idling.
+
+### Gotchas worth knowing
+
+- **Edit cells via `setCellSource` (the model), not `page.notebook.setCell`.**
+  Galata's `setCell` retypes into the CodeMirror editor; in ipyflow's
+  windowed-scrollbar notebook the editor can lose its selection, so the new text
+  is _appended_ instead of replacing (e.g. `x = 1` → `x = 42x = 1`, a silent
+  syntax error). `setCellSource` writes the shared model directly. The specs also
+  assert `cellSource(...)` after editing to catch any recurrence.
+- **Reactive / closure runs happen outside Galata's run path** (ipyflow calls
+  `CodeCell.execute` directly), so `page.notebook.runCell`'s `waitForRun` hangs
+  on them. Trigger reactive runs with a raw `page.keyboard.press('Control+Enter')`
+  and poll `execCount` / `cellOutputText` for the effect.
+- **The dependency graph only populates after a _patched_ run** (`runCell`,
+  Shift/Ctrl+Enter), not `page.notebook.run()`; `waitForEdge` waits for it.
+- **`restartKernel` swaps in a fresh kernel via `changeKernel`** (firing
+  `session.kernelChanged`, which the extension wires reconnection to). An
+  in-place `KernelConnection.restart()` does not fire it and the comm never
+  reconnects.
+
 ## Prerequisites
 
 The built extension and the ipyflow kernel must be installed in the active
