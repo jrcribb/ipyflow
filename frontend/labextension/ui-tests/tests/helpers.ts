@@ -24,24 +24,47 @@ export async function waitForComm(page: any): Promise<void> {
     .toBe(true);
 }
 
-/** Create a notebook on the ipyflow kernel, populate `cells`, await the comm. */
+/**
+ * Create a notebook on the ipyflow kernel, populate `cells`, await the comm.
+ * Returns the notebook's name (e.g. for `page.notebook.activate(name)` when
+ * juggling several notebooks).
+ */
 export async function openIpyflowNotebook(
   page: any,
   cells: string[]
-): Promise<void> {
-  await page.notebook.createNew(undefined, { kernel: 'ipyflow' });
+): Promise<string> {
+  const name = await page.notebook.createNew(undefined, { kernel: 'ipyflow' });
   // Wait for the comm to establish on the fresh (empty) notebook BEFORE adding
   // cells. The establish handler flips the notebook into windowed-scrollbar
   // mode and re-renders; letting that happen concurrently with galata's cell
   // construction races and can hang addCell (the cell DOM shifts underneath it).
   await waitForComm(page);
-  for (let i = 0; i < cells.length; i++) {
-    if (i === 0) {
-      await page.notebook.setCell(0, 'code', cells[0]);
-    } else {
-      await page.notebook.addCell('code', cells[i]);
-    }
-  }
+  await buildCells(page, cells);
+  return name;
+}
+
+/**
+ * Replace the foreground notebook's cells with exactly `sources` code cells, via
+ * the shared model. This is deterministic and immune to the editor/race issues
+ * of Galata's setCell/addCell -- the latter retypes into CodeMirror (which can
+ * append in ipyflow's windowed notebook, see setCellSource) and fires an
+ * *unawaited* insert-cell-below that leaves a stray trailing empty cell. Reads
+ * the model off the current panel, so it works on any kernel (not just ipyflow).
+ */
+export async function buildCells(page: any, sources: string[]): Promise<void> {
+  await page.evaluate((srcs: string[]) => {
+    const sm = (window as any).jupyterapp.shell.currentWidget.content.model
+      .sharedModel;
+    sm.transact(() => {
+      if (sm.cells.length > 1) {
+        sm.deleteCellRange(1, sm.cells.length);
+      }
+      sm.cells[0].setSource(srcs[0] ?? '');
+      for (let i = 1; i < srcs.length; i++) {
+        sm.insertCell(i, { cell_type: 'code', source: srcs[i] });
+      }
+    });
+  }, sources);
 }
 
 /** The union of the store's ready + waiting cell-id sets. */
@@ -73,9 +96,10 @@ export const execCount = (page: any, index: number): Promise<number | null> =>
 /**
  * The text of a cell's outputs, read from the output *model* (not the DOM, which
  * may be virtualized away in ipyflow's windowed-scrollbar mode). Concatenates
- * stream text and `text/plain` mime data. Useful across a kernel restart, where
- * execution counts reset and so cannot be compared, but a changed printed value
- * still proves a cell re-executed.
+ * stream text, `text/plain` mime data, and error tracebacks (so a raised
+ * exception is observable). Useful across a kernel restart, where execution
+ * counts reset and so cannot be compared, but a changed printed value (or a new
+ * error) still proves a cell re-executed.
  */
 export const cellOutputText = (page: any, index: number): Promise<string> =>
   page.evaluate((i: number) => {
@@ -93,6 +117,12 @@ export const cellOutputText = (page: any, index: number): Promise<string> =>
       const plain = json.data?.['text/plain'];
       if (typeof plain === 'string') {
         text += plain;
+      }
+      if (json.output_type === 'error') {
+        text += `${json.ename}: ${json.evalue}\n`;
+        if (Array.isArray(json.traceback)) {
+          text += json.traceback.join('\n');
+        }
       }
     }
     return text;
@@ -134,10 +164,52 @@ export async function setCellSource(
   );
 }
 
+/**
+ * Delete the cell at `index` via the shared model's `deleteCell`. Galata's
+ * `deleteCells` (and the `notebook:delete-cell` command / `d d` shortcut) proved
+ * unreliable here -- they didn't actually remove the cell -- whereas the model
+ * edit is synchronous and fires the same `cells.changed` notification ipyflow
+ * listens for.
+ */
+export async function deleteCell(page: any, index: number): Promise<void> {
+  await page.evaluate((i: number) => {
+    (window as any).ipyflow.notebook.model.sharedModel.deleteCell(i);
+  }, index);
+}
+
 /** A Playwright Locator for the cell at `index` in the foreground notebook. */
 export async function cellLocator(page: any, index: number) {
   const nb = await page.notebook.getNotebookInPanelLocator();
   return nb.locator('.jp-Cell').nth(index);
+}
+
+/**
+ * The CSS class list of the cell node at `index`, read straight off the widget
+ * (so membership checks are exact, avoiding substring traps like 'ipyflow-slice'
+ * matching 'ipyflow-slice-execute' under a regex).
+ */
+export const cellClassList = (page: any, index: number): Promise<string[]> =>
+  page.evaluate(
+    (i: number) =>
+      Array.from(
+        (window as any).ipyflow?.notebook?.widgets?.[i]?.node?.classList ?? []
+      ) as string[],
+    index
+  );
+
+/** Poll until the cell at `index` carries (or, if `present` is false, drops) a class. */
+export async function waitForCellClass(
+  page: any,
+  index: number,
+  className: string,
+  present = true
+): Promise<void> {
+  await expect
+    .poll(async () => (await cellClassList(page, index)).includes(className), {
+      timeout: 30_000,
+      message: `cell ${index} never ${present ? 'gained' : 'lost'} class ${className}`
+    })
+    .toBe(present);
 }
 
 /**
@@ -231,13 +303,26 @@ export async function restartKernel(page: any): Promise<void> {
   await waitForComm(page);
 }
 
-/** Put ipyflow into reactive mode by running a `%flow mode reactive` line. */
-export async function enableReactiveMode(page: any): Promise<void> {
-  await page.evaluate(async () => {
+/** Run a line of code on the foreground notebook's kernel (silently, off-cell). */
+export async function runKernelCode(page: any, code: string): Promise<void> {
+  await page.evaluate(async (src: string) => {
     const kernel = (window as any).ipyflow?.session?.session?.kernel;
-    await kernel.requestExecute({ code: '%flow mode reactive' }).done;
-  });
-  await waitForExecMode(page, 'reactive');
+    await kernel.requestExecute({ code: src }).done;
+  }, code);
+}
+
+/** Set ipyflow's exec mode via `%flow mode <mode>` and wait for the store to reflect it. */
+export async function setFlowMode(
+  page: any,
+  mode: 'lazy' | 'reactive'
+): Promise<void> {
+  await runKernelCode(page, `%flow mode ${mode}`);
+  await waitForExecMode(page, mode);
+}
+
+/** Put ipyflow into reactive mode (convenience wrapper around {@link setFlowMode}). */
+export async function enableReactiveMode(page: any): Promise<void> {
+  await setFlowMode(page, 'reactive');
 }
 
 /**
@@ -272,6 +357,9 @@ export const dumpNotebook = (
         const plain = json.data?.['text/plain'];
         if (typeof plain === 'string') {
           output += plain;
+        }
+        if (json.output_type === 'error') {
+          output += `${json.ename}: ${json.evalue}\n`;
         }
       }
       return {

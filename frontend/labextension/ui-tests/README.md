@@ -9,9 +9,10 @@ decoration, reactive re-execution).
 
 - `tests/helpers.ts` — shared plumbing (no tests). Reads ipyflow's per-session
   store off `window.ipyflow` and drives JupyterLab via `window.jupyterapp`:
-  `waitForComm`, `openIpyflowNotebook`, `waitForEdge` / `cellChildrenIncludes`
-  (dependency graph), `execCount` / `cellOutputText` / `cellSource`,
-  `setCellSource`, `restartKernel`, `enableReactiveMode`, and
+  `openIpyflowNotebook` / `buildCells`, `waitForComm`, `waitForEdge` /
+  `cellChildrenIncludes` (dependency graph), `execCount` / `cellOutputText` /
+  `cellSource` / `cellClassList` / `waitForCellClass`, `setCellSource` /
+  `deleteCell`, `setFlowMode` / `enableReactiveMode`, `restartKernel`, and
   `attachNotebookDumpOnFailure` (attaches a JSON dump of every cell's
   source/output/exec-count to the report when a test fails).
 - `tests/ipyflow.spec.ts` — comm establishment, dependency-aware ready
@@ -20,28 +21,54 @@ decoration, reactive re-execution).
   (`Accel+J` / `Accel+ArrowDown`), backward slice (`Accel+K` / `Accel+ArrowUp`),
   alt-mode execute (`Ctrl/Accel+Shift+Enter`), and run-ready-cells (`Space`).
   Each asserts the exact set of cells that (re)ran.
+- `tests/decorations.spec.ts` — the decoration layer (`ui/decorations.ts`):
+  forward/backward **slice highlighting** of the selection (`ipyflow-slice` /
+  `ipyflow-slice-execute`), the `ready-cell` vs `waiting-cell` distinction for
+  directly- vs transitively-stale dependents, and collapser-hover link
+  highlighting.
+- `tests/modes.spec.ts` — execution modes: an error mid-cascade aborts the
+  downstream reactive re-execution; switching reactive → lazy stops dependents
+  from auto-running.
+- `tests/notebook-ops.spec.ts` — deleting a cell keeps the surviving graph
+  working; two notebooks keep independent graphs (store repoints on focus
+  change); a cell run before the comm establishes still executes.
+- `tests/commands.spec.ts` — the `alt-mode-execute` command (forward closure)
+  and the run-and-advance bookkeeping (insert below the last cell vs advance).
 - `tests/restart.spec.ts` — behavior across a kernel restart: the dependency
   graph persists (via notebook metadata) and reactive re-execution still works
   immediately after, and after idling.
+- `tests/persistence.spec.ts` — the dependency graph survives closing and
+  reopening the notebook (disk round-trip through the `.ipynb`).
+- `tests/fallback.spec.ts` — on a non-ipyflow (`python3`) kernel the extension
+  stays out of the way: cells run normally, no comm, no decorations.
 
 ### Gotchas worth knowing
 
-- **Edit cells via `setCellSource` (the model), not `page.notebook.setCell`.**
-  Galata's `setCell` retypes into the CodeMirror editor; in ipyflow's
-  windowed-scrollbar notebook the editor can lose its selection, so the new text
-  is _appended_ instead of replacing (e.g. `x = 1` → `x = 42x = 1`, a silent
-  syntax error). `setCellSource` writes the shared model directly. The specs also
-  assert `cellSource(...)` after editing to catch any recurrence.
+- **Build / edit cells via the shared model, not Galata's editor APIs.**
+  `openIpyflowNotebook` / `buildCells` and `setCellSource` write the shared model
+  directly. Galata's `setCell`/`addCell` retype into the CodeMirror editor; in
+  ipyflow's windowed-scrollbar notebook the editor can lose its selection, so the
+  new text is _appended_ instead of replacing (e.g. `x = 1` → `x = 42x = 1`, a
+  silent syntax error), and `addCell` fires an _unawaited_ insert-cell-below that
+  leaves a stray trailing empty cell. The specs also assert `cellSource(...)`
+  after editing to catch any recurrence.
+- **`runCell(i)` defaults to Shift+Enter (run-and-advance)**, which inserts a new
+  cell when run on the last cell. Pass `runCell(i, true)` (Control+Enter,
+  in-place) when the exact cell count matters.
+- **`getCellCount` / `widgets.length` are unreliable** in the windowed notebook
+  (virtualized DOM); read `…model.sharedModel.cells.length` for the true count.
 - **Reactive / closure runs happen outside Galata's run path** (ipyflow calls
   `CodeCell.execute` directly), so `page.notebook.runCell`'s `waitForRun` hangs
   on them. Trigger reactive runs with a raw `page.keyboard.press('Control+Enter')`
-  and poll `execCount` / `cellOutputText` for the effect.
+  and poll `execCount` / `cellOutputText` for the effect. `cellOutputText` also
+  surfaces error tracebacks, so a raised exception is observable.
 - **The dependency graph only populates after a _patched_ run** (`runCell`,
   Shift/Ctrl+Enter), not `page.notebook.run()`; `waitForEdge` waits for it.
 - **`restartKernel` swaps in a fresh kernel via `changeKernel`** (firing
   `session.kernelChanged`, which the extension wires reconnection to). An
   in-place `KernelConnection.restart()` does not fire it and the comm never
-  reconnects.
+  reconnects. A full `page.reload()` mid-test desyncs Galata's fixtures — close +
+  reopen the notebook instead (see `persistence.spec.ts`).
 
 ## Prerequisites
 
