@@ -97,33 +97,25 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -e ./core/.[dev] jupyterlab
-    - name: Install labextension deps
-      working-directory: frontend/labextension
+    - name: Guard against private-registry lockfiles
       run: |
-        node --version
-        npm --version
-        free -h || true
-        df -h . || true
-        # Verbose so the crash point ("Exit handler never called!") is visible
-        # inline instead of being swallowed. Install only (no scripts); build is
-        # a separate step below.
-        npm ci --ignore-scripts --no-audit --no-fund --loglevel verbose
-    - name: Dump npm debug log on failure
-      if: ${{ failure() }}
-      run: |
-        echo "===== resources ====="
-        free -h || true
-        df -h || true
-        echo "===== dmesg (look for oom-killer) ====="
-        sudo dmesg | tail -40 || true
-        echo "===== npm debug logs ====="
-        for f in ~/.npm/_logs/*-debug-*.log; do
-          echo "----- $f -----"
-          tail -60 "$f" || true
-        done
+        # The committed package-lock.json files must resolve packages from the
+        # public registry. If a lock is regenerated behind a private registry
+        # (e.g. a ~/.npmrc pointing at an internal proxy), the baked-in
+        # "resolved" URLs are unreachable from CI and npm hangs for ~8 minutes
+        # before crashing with the misleading "Exit handler never called!".
+        if grep -RnE '"resolved": "https?://[^/]*\.databricks\.com/' \
+             frontend/labextension/package-lock.json \
+             frontend/labextension/ui-tests/package-lock.json; then
+          echo "::error::lockfile pins a private registry; re-run 'npm install' against https://registry.npmjs.org/"
+          exit 1
+        fi
     - name: Build labextension, link it, and install the kernel
       run: |
-        (cd frontend/labextension && npm run build)
+        # Install deps and build as separate top-level commands; --ignore-scripts
+        # keeps install from running the package's `prepare` build (which spawns
+        # nested npm processes), then build explicitly with visible output.
+        (cd frontend/labextension && npm ci --ignore-scripts && npm run build)
         # Verify the build output exists before continuing instead of failing
         # much later (and opaquely) at the sanity grep below.
         test -f core/ipyflow/resources/labextension/package.json
