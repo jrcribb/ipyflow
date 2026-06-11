@@ -97,15 +97,33 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -e ./core/.[dev] jupyterlab
+    - name: Install labextension deps
+      working-directory: frontend/labextension
+      run: |
+        node --version
+        npm --version
+        free -h || true
+        df -h . || true
+        # Verbose so the crash point ("Exit handler never called!") is visible
+        # inline instead of being swallowed. Install only (no scripts); build is
+        # a separate step below.
+        npm ci --ignore-scripts --no-audit --no-fund --loglevel verbose
+    - name: Dump npm debug log on failure
+      if: ${{ failure() }}
+      run: |
+        echo "===== resources ====="
+        free -h || true
+        df -h || true
+        echo "===== dmesg (look for oom-killer) ====="
+        sudo dmesg | tail -40 || true
+        echo "===== npm debug logs ====="
+        for f in ~/.npm/_logs/*-debug-*.log; do
+          echo "----- $f -----"
+          tail -60 "$f" || true
+        done
     - name: Build labextension, link it, and install the kernel
       run: |
-        # Install deps and build as two separate top-level commands rather than
-        # letting the package's `prepare` script build during `npm install`.
-        # Building inside the install spawns nested `npm run` processes, which
-        # trips npm's "Exit handler never called!" crash on the CI runner and
-        # leaves the labextension unbuilt. `--ignore-scripts` keeps install from
-        # running prepare; the build is then a visible step with its own exit code.
-        (cd frontend/labextension && npm ci --ignore-scripts && npm run build)
+        (cd frontend/labextension && npm run build)
         # Verify the build output exists before continuing instead of failing
         # much later (and opaquely) at the sanity grep below.
         test -f core/ipyflow/resources/labextension/package.json
