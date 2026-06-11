@@ -19,7 +19,6 @@ fi
 
 for pkg_dir in ./core .; do
     ./scripts/deploy.sh $pkg_dir
-    popd
 done
 
 pushd ./frontend/labextension
