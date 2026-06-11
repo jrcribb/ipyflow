@@ -5,7 +5,18 @@ import os
 import sys
 from contextlib import contextmanager, suppress
 from types import FrameType
-from typing import Callable, Generator, List, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import pyccolo as pyc
 from IPython import get_ipython
@@ -67,6 +78,16 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         self._saved_meta_path_entries: List[TraceFinder] = []
         self._has_cell_id: bool = (
             "cell_id" in inspect.signature(super()._run_cell).parameters
+        )
+        # The kwargs accepted by the base IPython implementations that we
+        # ultimately forward to. ipykernel periodically grows the set of kwargs
+        # it passes into ``shell.run_cell`` (e.g. ``cell_id``, and ``cell_meta``
+        # as of ipykernel 7.3) ahead of the IPython release that accepts them,
+        # so we drop any kwarg the base shell doesn't understand rather than
+        # letting it raise a TypeError.
+        self._super_run_cell_param_names = self._concrete_param_names("run_cell")
+        self._super_run_cell_async_param_names = self._concrete_param_names(
+            "run_cell_async"
         )
         self._should_capture_output = False
         for qualified_tracer_cls_name in reversed(
@@ -332,6 +353,42 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         self._should_capture_output = False
         return ret
 
+    @classmethod
+    def _concrete_param_names(cls, method_name: str) -> Optional[Set[str]]:
+        """Names of the kwargs accepted by the first implementation of
+        ``method_name`` in the MRO that doesn't just forward via ``**kwargs``.
+
+        Returns ``None`` when every implementation forwards arbitrary kwargs (in
+        which case no filtering should be applied).
+        """
+        for klass in cls.__mro__:
+            func = klass.__dict__.get(method_name)
+            if func is None:
+                continue
+            params = list(inspect.signature(func).parameters.values())
+            if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+                # this implementation forwards everything; keep looking for the
+                # concrete consumer further down the MRO
+                continue
+            return {
+                p.name
+                for p in params
+                if p.kind
+                in (
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                )
+            }
+        return None
+
+    @staticmethod
+    def _filter_super_kwargs(
+        accepted: Optional[Set[str]], kwargs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if accepted is None:
+            return kwargs
+        return {k: v for k, v in kwargs.items() if k in accepted}
+
     def run_cell(
         self,
         raw_cell,
@@ -351,7 +408,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                 store_history=store_history,
                 silent=silent,
                 shell_futures=shell_futures,
-                **kwargs,
+                **self._filter_super_kwargs(self._super_run_cell_param_names, kwargs),
             )
         finally:
             # won't be available if extension is disabled
@@ -379,7 +436,9 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                 store_history=store_history,
                 silent=silent,
                 shell_futures=shell_futures,
-                **kwargs,
+                **self._filter_super_kwargs(
+                    self._super_run_cell_async_param_names, kwargs
+                ),
             )
         else:
             with save_number_of_currently_executing_cell():
@@ -434,7 +493,9 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                     store_history=store_history,
                     silent=False,
                     shell_futures=shell_futures,
-                    **kwargs,
+                    **self._filter_super_kwargs(
+                        self._super_run_cell_async_param_names, kwargs
+                    ),
                 )  # pragma: no cover
                 cell.error_in_exec = ret.error_in_exec
                 if is_already_recording_output:
