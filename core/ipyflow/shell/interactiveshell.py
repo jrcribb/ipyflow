@@ -163,6 +163,28 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
             tracer.__class__.should_instrument_file = orig_checker  # type: ignore[method-assign]
 
     @contextmanager
+    def _eval_tracing_disabled(self):
+        # Disable our tracer during pyc.exec/eval (it does not work properly
+        # inside). When a guard-disabled co-tracer (e.g. pipescript, which sets
+        # global_guards_enabled=False) is registered, also disable the rest of our
+        # guard-using tracer family for the duration: the co-tracer builds lambdas
+        # via pyc.eval, and with our family disabled those sandboxes are rewritten
+        # using only the co-tracer's tracers -- i.e. guard-free and untraced by us.
+        # That avoids weaving our (here unused) guard machinery into code that runs
+        # once per element of a macro, which is otherwise a large slowdown. With no
+        # such co-tracer present this is exactly the old behavior (only the
+        # dataflow tracer is disabled).
+        to_disable = [DataflowTracer.instance()]
+        if any(not tracer.global_guards_enabled for tracer in self.registered_tracers):
+            to_disable += [
+                tracer.instance()
+                for tracer in self.registered_tracers
+                if tracer.global_guards_enabled and tracer is not DataflowTracer
+            ]
+        with pyc.multi_context([tracer.tracing_disabled() for tracer in to_disable]):
+            yield
+
+    @contextmanager
     def _patch_pyccolo_exec_eval(self):
         """
         The purpose of this context manager is to disable this project's
@@ -175,7 +197,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         orig_tracer_eval = pyc.BaseTracer.eval
 
         def _patched_exec(*args, **kwargs):
-            with DataflowTracer.instance().tracing_disabled():
+            with self._eval_tracing_disabled():
                 return orig_exec(
                     *args,
                     num_extra_lookback_frames=kwargs.pop("num_extra_lookback_frames", 0)
@@ -184,7 +206,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                 )
 
         def _patched_eval(*args, **kwargs):
-            with DataflowTracer.instance().tracing_disabled():
+            with self._eval_tracing_disabled():
                 return orig_eval(
                     *args,
                     num_extra_lookback_frames=kwargs.pop("num_extra_lookback_frames", 0)
@@ -193,7 +215,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                 )
 
         def _patched_tracer_exec(*args, **kwargs):
-            with DataflowTracer.instance().tracing_disabled():
+            with self._eval_tracing_disabled():
                 return orig_tracer_exec(
                     *args,
                     num_extra_lookback_frames=kwargs.pop("num_extra_lookback_frames", 0)
@@ -202,7 +224,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
                 )
 
         def _patched_tracer_eval(*args, **kwargs):
-            with DataflowTracer.instance().tracing_disabled():
+            with self._eval_tracing_disabled():
                 return orig_tracer_eval(
                     *args,
                     num_extra_lookback_frames=kwargs.pop("num_extra_lookback_frames", 0)

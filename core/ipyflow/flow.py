@@ -21,7 +21,7 @@ from typing import (
 
 import pyccolo as pyc
 from ipykernel.ipkernel import IPythonKernel
-from pyccolo.tracer import PYCCOLO_DEV_MODE_ENV_VAR
+from pyccolo.tracer import HIDE_PYCCOLO_FRAME, PYCCOLO_DEV_MODE_ENV_VAR
 
 from ipyflow import singletons
 from ipyflow.analysis.symbol_ref import SymbolRef
@@ -467,6 +467,11 @@ class NotebookFlow(singletons.NotebookFlow):
             while (
                 frame.f_code.co_filename.startswith("<sandbox")
                 or "pyccolo" in frame.f_code.co_filename
+                # Frames a cooperating tracer (e.g. pipescript) marks as hidden
+                # infrastructure are not notebook code; their source line numbers
+                # belong to the tracer's own files, not the executing cell, so
+                # skip past them to the nearest real cell/library frame.
+                or frame.f_locals.get(HIDE_PYCCOLO_FRAME, False)
             ):
                 frame = frame.f_back  # type: ignore[assignment]
             cell_num = self._cell_name_to_cell_num_mapping.get(frame.f_code.co_filename)

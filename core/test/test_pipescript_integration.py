@@ -247,6 +247,60 @@ def test_quick_lambda_named_placeholders():
 
 
 # ---------------------------------------------------------------------------
+# Subscript-based macros (``map[...]``) in loops, comprehensions, and nested
+#
+# pipescript's ``map[...]`` macro relies on its MacroTracer intercepting
+# ``before_subscript_load`` to swap the builtin ``map`` for an identity-subscript
+# shim -- this is required for *correctness*, not mere observation. ipyflow's
+# performance optimizations (pyccolo loop/comprehension guards, the external-
+# call-depth limit, and repeated-call tracing-disable) each previously suppressed
+# that swap on repeat executions, so the macro reached the real builtin and
+# raised ``TypeError: type 'map' is not subscriptable``.
+#
+# Fixes (all keyed on a co-tracer that, like all of pipescript's, sets
+# ``global_guards_enabled = False`` -- i.e. performs substitution, not mere
+# observation):
+#   * pyccolo treats such a tracer's handlers as guard-exempt (loops), and emits
+#     a guard-exempt fallback for comprehension elements;
+#   * ipyflow keeps tracing into the tracer's sandbox-generated lambdas instead
+#     of disabling on call depth / repeated calls;
+#   * ipyflow's get_position skips ``__hide_pyccolo_frame__`` infrastructure
+#     frames so pipescript's pipe-application lambdas don't misattribute their
+#     source line numbers to the executing cell.
+# ---------------------------------------------------------------------------
+
+
+def test_map_macro_in_for_loop():
+    run_cell(
+        "out = []\n"
+        'for row in [["1", "2", "3"], ["4", "5", "6"]]:\n'
+        "    out.append(row |> map[int] |> sum)\n"
+        "result = out"
+    )
+    assert result() == [6, 15]
+
+
+def test_map_macro_in_comprehension():
+    run_cell("result = [row |> map[int] |> sum for row in [['1', '2'], ['3', '4']]]")
+    assert result() == [3, 7]
+
+
+def test_nested_map_macro():
+    run_cell("result = [['1', '2'], ['3', '4']] |> map[map[int]] |> list")
+    assert result() == [[1, 2], [3, 4]]
+
+
+def test_nested_map_macro_across_loop_iterations():
+    # Advent of Code 2015 day 2: 2x3x4 -> 34, 3x4x5 -> 74, sum -> 108.
+    run_cell(
+        'result = "2x3x4\\n3x4x5".strip().splitlines() '
+        '|> map[$.split("x") |> map[int] '
+        "*|> $l*$w*$h + 2*min($l+$w, $w+$h, $h+$l)] |> sum"
+    )
+    assert result() == 108
+
+
+# ---------------------------------------------------------------------------
 # Placeholder liveness
 #
 # pipescript rewrites its ``$`` / ``$$`` placeholders to ``_`` (and ``$foo`` to
