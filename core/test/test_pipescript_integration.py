@@ -301,6 +301,146 @@ def test_nested_map_macro_across_loop_iterations():
 
 
 # ---------------------------------------------------------------------------
+# Brace blocks (`macro{ ... }`)
+#
+# pipescript's BraceBlockTracer lets any macro written `macro[...]` also be
+# written `macro{...}`, including multi-line *statement* bodies whose trailing
+# expression is the result. Under ipyflow these previously failed outright: the
+# block was stashed and the slice replaced with a marker, but (a) the marker was
+# an undefined name that ipyflow's `before_subscript_slice` evaluated before the
+# macro could substitute it (NameError), and (b) ipyflow invokes the syntax
+# augmenter several times per cell, so a per-pass marker id made the augmenter
+# non-idempotent and the cell ran uninstrumented. The compiled block is also
+# synthetic sandbox code, so it must stay invisible to ipyflow's dataflow tracer
+# (hidden compile frames + instrumenting the block with only the substituting
+# tracers).
+# ---------------------------------------------------------------------------
+
+
+def test_brace_expression_block():
+    run_cell("result = [0, 1, 2] |> map{ $ + 10 } |> list")
+    assert result() == [10, 11, 12], result()
+
+
+def test_brace_statement_block():
+    run_cell(
+        "result = [1, 2, 3, 4] |> map{\n"
+        "    acc = 0\n"
+        "    for i in range($):\n"
+        "        acc += i\n"
+        "    acc\n"
+        "} |> list"
+    )
+    assert result() == [0, 1, 3, 6], result()
+
+
+def test_brace_block_with_bare_pipeline_stage():
+    # a bare pipe stage inside a block: the stage's `$` is the pipe argument
+    # (left for PipelineTracer), not the block's collapse-`$`. Without the fix
+    # both `$` collapse to the block input, giving `n |> (n+10)` -> `n+10` called
+    # as a function -> "int object is not callable".
+    run_cell(
+        "result = [0, 1, 2] |> map{\n"
+        "    doubled = $ * 2\n"
+        "    doubled |> $ + 10\n"
+        "} |> list"
+    )
+    assert result() == [10, 12, 14], result()
+
+
+# ---------------------------------------------------------------------------
+# Dynamic *method* macros (``obj.foreach[...]``, ``obj.foreach{...}``).
+#
+# A method macro's template (e.g. ``foreach = method[$$ |> map[do[$$]] |> list]``)
+# is defined once and expanded on later cells. Its expansion relies on the
+# template still carrying its augmentation marks ($$ placeholders, |> pipe ops,
+# nested map/do markers). Those live in pyccolo's process-wide bookkeeping, which
+# ``reset_bookkeeping`` wipes wholesale (between cells in this harness) -- after
+# which the template expanded to nothing (`Wrong number of arguments: expected 0
+# but got 1`, swallowed -> silent no-op). pipescript now latches the template's
+# marks durably and re-establishes them per expansion.
+# ---------------------------------------------------------------------------
+
+
+def test_foreach_method_macro_bracket():
+    run_cell("out = []\n[0, 1, 2].foreach[do[out.append($)]]\nresult = out")
+    assert result() == [0, 1, 2], result()
+
+
+def test_foreach_method_macro_brace_block():
+    run_cell(
+        "result = []\n"
+        "[0, 1, 2].foreach{\n"
+        "    if $ == 0:\n"
+        "        result.append('zero')\n"
+        "    else:\n"
+        "        result.append($ |> $ + 1)\n"
+        "}"
+    )
+    assert result() == ["zero", 2, 3], result()
+
+
+def test_custom_method_macro_reused_across_cells():
+    run_cell("twice = method[$$ |> map[$$] |> list]")
+    run_cell("result = [1, 2, 3].twice[$ + 100]")
+    assert result() == [101, 102, 103], result()
+    run_cell("result = [4, 5].twice[$ * 10]")
+    assert result() == [40, 50], result()
+
+
+# ---------------------------------------------------------------------------
+# Macros implemented as Python functions that synchronously call the user's
+# placeholder-lambda (fork/parallel/when/unless/do/expect/...). The called
+# lambda lives in a pyccolo sandbox, but the macro's own frame sits between it
+# and the cell; unless that frame is marked hidden, ipyflow's get_position stops
+# there and maps the static_macros source line onto the executing cell, raising
+# in _get_stmt_node_for_sys_event. (Macros backed by C builtins like map/filter
+# never hit this -- there is no intervening Python frame.) These exercise the
+# `__hide_pyccolo_frame__` markers on those functions.
+# ---------------------------------------------------------------------------
+
+
+def test_fork():
+    run_cell("result = 5 |> fork[$ + 1, $ * 2]")
+    assert result() == (6, 10), result()
+
+
+def test_parallel():
+    run_cell("result = 5 |> parallel[$ + 1, $ * 2]")
+    assert result() == (6, 10), result()
+
+
+def test_when_passes_through():
+    run_cell("result = 5 |> when[$ > 0]")
+    assert result() == 5, result()
+
+
+def test_unless_passes_through():
+    run_cell("result = 5 |> unless[$ < 0]")
+    assert result() == 5, result()
+
+
+def test_until_passes_through():
+    run_cell("result = 5 |> until[$ < 0]")
+    assert result() == 5, result()
+
+
+def test_expect_passes_through():
+    run_cell("result = 5 |> expect[$ > 0]")
+    assert result() == 5, result()
+
+
+def test_do_side_effect():
+    run_cell("out = []\n5 |> do[out.append($ * 2)]\nresult = out")
+    assert result() == [10], result()
+
+
+def test_brace_fork_tuple():
+    run_cell("result = 5 |> fork{ $ + 1, $ * 2 }")
+    assert result() == (6, 10), result()
+
+
+# ---------------------------------------------------------------------------
 # Placeholder liveness
 #
 # pipescript rewrites its ``$`` / ``$$`` placeholders to ``_`` (and ``$foo`` to
