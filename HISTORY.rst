@@ -1,6 +1,11 @@
 History
 =======
 
+0.0.229 (2026-06-12)
+--------------------
+* [kernel] make pipescript macros work (and stay fast) under ipyflow tracing;
+* [kernel] bump required pyccolo;
+
 0.0.228 (2026-06-10)
 --------------------
 * [lab] refactor, modularize, and upgrade the JupyterLab extension;
