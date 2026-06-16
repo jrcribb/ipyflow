@@ -526,3 +526,35 @@ def test_placeholder_not_live_after_intervening_executions():
     assert not any(str(r.ref).startswith("('_'") for r in live), {
         str(r.ref) for r in live
     }
+
+
+def test_pipescript_block_traceback_diagnosis_and_pinpointing():
+    # A `fork` branch that *applies* (`|> all`) where it must *compose* (`.> all`)
+    # leaks a stage-function into `all(...)`. End-to-end under ipyflow we expect:
+    # the diagnostic notes (apply-vs-compose hint + which branch), and a visible,
+    # meaningfully-named block frame that pinpoints the failing stage's source.
+    run_cell(
+        "import traceback as _tb\n"
+        "try:\n"
+        "    result = ['aaa', 'bbb'] |> map{\n"
+        "        ok = $ |> fork[ map[$v in 'aeiou'] .> any, map[$ in 'aeiou'] |> all ] |> all\n"
+        "        ok\n"
+        "    } |> sum\n"
+        "except Exception as _e:\n"
+        "    _notes = list(getattr(_e, '_pyc_notes', []))\n"
+        "    _frames = [\n"
+        "        (f.f_code.co_name, f.f_code.co_filename)\n"
+        "        for f, _ in _tb.walk_tb(_e.__traceback__)\n"
+        "    ]\n"
+    )
+    import pyccolo as pyc
+
+    notes = shell().user_ns["_notes"]
+    assert any("fork branch #2 of 2" in n for n in notes), notes
+    assert any(".>" in n and "compose" in n for n in notes), notes
+    # the block frame is meaningfully named and kept visible by ipyflow's filter
+    frames = shell().user_ns["_frames"]
+    assert any(
+        name == "map{...}" and pyc.is_traceback_visible(fname)
+        for name, fname in frames
+    ), frames

@@ -21,7 +21,7 @@ from typing import (
 import pyccolo as pyc
 from IPython import get_ipython
 from IPython.core.interactiveshell import ExecutionResult, InteractiveShell
-from pyccolo.emit_event import SANDBOX_FNAME_PREFIX
+from pyccolo.emit_event import SANDBOX_FNAME_PREFIX, is_traceback_visible
 from pyccolo.import_hooks import TraceFinder
 from pyccolo.tracer import (
     HIDE_PYCCOLO_FRAME,
@@ -790,16 +790,21 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
             should_filter = False
             frame: FrameType = tb.tb_frame
             if prev is not None:
+                fname = frame.f_code.co_filename
                 should_filter = frame.f_locals.get(HIDE_PYCCOLO_FRAME, False)
-                should_filter = should_filter or frame.f_code.co_filename.startswith(
-                    SANDBOX_FNAME_PREFIX
+                # Keep sandbox frames that carry meaningful user source (e.g. a
+                # compiled pipescript block / stage), marked in the shared
+                # pyccolo registry, so they pinpoint the failure.
+                should_filter = should_filter or (
+                    fname.startswith(SANDBOX_FNAME_PREFIX)
+                    and not is_traceback_visible(fname)
                 )
                 should_filter = should_filter or frame.f_code.co_name in (
                     TRACED_LAMBDA_NAME,
                     "_patched_eval",
                     "_patched_tracer_eval",
                 )
-                should_filter = should_filter or "pyccolo" in frame.f_code.co_filename
+                should_filter = should_filter or "pyccolo" in fname
             if should_filter and prev is not None:
                 prev.tb_next = tb.tb_next
             else:
