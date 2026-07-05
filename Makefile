@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-record uitest-report e2e
+.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-record uitest-report e2e jupyterlite jupyterlite-serve jupyterlite-dev
 
 # Prefer uv if available, otherwise fall back to pip. Override with `make <t> PIP=...`.
 ifeq ($(shell command -v uv 2>/dev/null),)
@@ -100,3 +100,23 @@ uitest-report:
 # Headless kernel comm-protocol end-to-end test (starts a real ipyflow kernel).
 e2e:
 	cd core && IPYFLOW_KERNEL_E2E=1 python -m pytest test/test_kernel_comm_e2e.py -v
+
+# Port for the local JupyterLite demo server; override with `make ... LITE_PORT=8999`.
+LITE_PORT ?= 8000
+
+# Build the JupyterLite demo site into ./dist (labextension + ipyflow-core wheel
+# + offline runtime dep wheels). Needs PyPI reachable to download the dep wheels;
+# once built, the site runs fully offline in the browser.
+jupyterlite:
+	bash jupyterlite/build.sh dist
+
+# Serve the JupyterLite demo. Builds it first only if ./dist isn't a built site
+# yet, so re-serving an existing build is instant (no rebuild, no PyPI needed).
+# Use `make jupyterlite` to force a fresh build. Override the port with LITE_PORT.
+jupyterlite-serve:
+	@test -f dist/lab/index.html || $(MAKE) jupyterlite
+	@echo "Serving JupyterLite demo at http://127.0.0.1:$(LITE_PORT)/lab/index.html?path=demo.ipynb (Ctrl-C to stop)"
+	python -m http.server -d dist $(LITE_PORT)
+
+# Force a fresh build, then serve.
+jupyterlite-dev: jupyterlite jupyterlite-serve

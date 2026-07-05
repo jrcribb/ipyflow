@@ -6,6 +6,7 @@
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![](https://img.shields.io/pypi/v/ipyflow.svg)](https://pypi.org/project/ipyflow)
 ![](https://img.shields.io/pypi/pyversions/ipyflow.svg)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://ipyflow.github.io/ipyflow/lab/index.html?path=demo.ipynb)
 
 TL;DR
 -----

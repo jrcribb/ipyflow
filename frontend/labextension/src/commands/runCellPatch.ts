@@ -45,7 +45,13 @@ export function patchRunCommands(
 
   const isBatchReactive = () => {
     const state = getIpyflowState();
-    return state.isBatchReactive();
+    // `getIpyflowState` returns an empty `{}` when the store is missing (e.g.
+    // during a JupyterLite kernel reconnect, when the store was reset). Guard so
+    // running a cell / pressing a shortcut doesn't throw
+    // "isBatchReactive is not a function" before the cell is ever submitted.
+    return typeof state.isBatchReactive === 'function'
+      ? state.isBatchReactive()
+      : false;
   };
 
   const executeBatchReactive = (skipFirst = false) => {

@@ -17,6 +17,61 @@ import { createMessageHandler } from './messageHandlers';
 import { createNotebookEventHandlers } from './notebookEvents';
 
 /**
+ * Pre-install (but do NOT activate) ipyflow under JupyterLite/Pyodide, so the
+ * user can `%load_ext ipyflow` without a manual `%pip install` first. This only
+ * `pip install`s `ipyflow-core` (resolved offline from the bundled piplite
+ * index) -- it does not run `load_ipython_extension`, so nothing activates until
+ * the user opts in. On a regular Jupyter kernel the `sys.platform` gate makes it
+ * a no-op.
+ *
+ * Awaited before the comm is set up so it lands as the first execute on the
+ * fresh kernel; `import ipyflow` is then ready by the time the user runs
+ * `%load_ext ipyflow` (even from a "Run All").
+ */
+async function ensureIpyflowInstalled(session: ISessionContext): Promise<void> {
+  const kernel = session.session?.kernel;
+  if (kernel == null) {
+    return;
+  }
+  const code = [
+    'import sys as _sys',
+    "if _sys.platform == 'emscripten':",
+    '    try:',
+    '        import piplite as _piplite',
+    // keep_going=True mirrors what the `%pip install` magic does: skip deps that
+    // can't be resolved in-browser (e.g. ipykernel/pyzmq, ipywidgets) rather
+    // than failing the whole install. ipyflow imports fine without them.
+    "        await _piplite.install('ipyflow-core', keep_going=True)",
+    '    except Exception:',
+    '        pass',
+  ].join('\n');
+  try {
+    await kernel.requestExecute({
+      code,
+      silent: true,
+      store_history: false,
+      stop_on_error: false,
+    }).done;
+  } catch {
+    // Expected if the kernel is restarted during the heavy first load; the
+    // install re-runs on reconnect (kernelChanged handler in setupComm).
+  }
+}
+
+/**
+ * Create the `ipyflow` data comm. We let the kernel comm manager assign the
+ * comm id instead of pinning it to a fixed `'ipyflow'`: on a JupyterLite/Pyodide
+ * kernel reconnect (e.g. the kernel stalling during the one-time in-browser
+ * install) the previous comm may not be disposed yet, and re-creating it under a
+ * fixed id throws "Comm is already created", leaving the session with a dead
+ * comm. The kernel side keys off the target name, not the id, so a fresh id each
+ * time is safe and reconnect-resilient.
+ */
+function createIpyflowComm(session: ISessionContext) {
+  return session.session.kernel.createComm('ipyflow');
+}
+
+/**
  * Establish the ipyflow comm for a notebook session: create the store, build
  * the connection context, wire the notebook event handlers and message
  * dispatcher, and open the comm. Returns a disconnect handler that tears the
@@ -27,10 +82,11 @@ export function connectToComm(
   notebooks: INotebookTracker,
   notebook: Notebook,
   docManager: IDocumentManager,
+  allowSelfEstablish = false,
 ): () => void {
   const store = initStore(session.session.id);
   store.activeCell = notebook.activeCell;
-  store.comm = session.session.kernel.createComm('ipyflow', 'ipyflow');
+  store.comm = createIpyflowComm(session);
   store.notebook = notebook;
   store.session = session;
 
@@ -64,7 +120,7 @@ export function connectToComm(
     } else if (store.comm.isDisposed) {
       ctx.onEstablishPayload = data;
       const oldComm = store.comm;
-      store.comm = session.session.kernel.createComm('ipyflow', 'ipyflow');
+      store.comm = createIpyflowComm(session);
       store.comm.onMsg = oldComm.onMsg;
       store.comm.open({
         interface: 'jupyterlab',
@@ -99,6 +155,30 @@ export function connectToComm(
     cell_parents: ctx.ipyflowMetadata?.cell_parents ?? {},
     cell_children: ctx.ipyflowMetadata?.cell_children ?? {},
   });
+
+  // Fallback for kernels that cannot deliver the kernel-side `establish` reply
+  // sent from inside their comm_open handler (JupyterLite/Pyodide: the worker is
+  // mid-RPC and blocks its event loop between requests, so the reply never
+  // lands). comm_open runs synchronously kernel-side there, so by now the kernel
+  // has already initialized the comm target; if we still haven't been
+  // established shortly after opening, drive the establish handling ourselves.
+  //
+  // Only do this when the connect was triggered by the `ipyflow-client`
+  // establish (i.e. `%load_ext ipyflow` actually ran and registered the comm
+  // target) -- NOT for the speculative connect on session-ready. Otherwise a
+  // kernel with ipyflow not loaded (e.g. before `%load_ext`) would falsely
+  // appear ipyflow-connected. On a normal kernel the real `establish` arrives
+  // first and this no-ops regardless.
+  if (allowSelfEstablish) {
+    setTimeout(() => {
+      if (ctx.disconnected || store.isIpyflowCommConnected) {
+        return;
+      }
+      store.comm.onMsg({
+        content: { data: { type: 'establish', success: true } },
+      } as any);
+    }, 2000);
+  }
 
   return commDisconnectHandler;
 }
@@ -142,11 +222,15 @@ export function setupComm(
               commDisconnectHandler();
             } else if (payload.type === 'establish') {
               commDisconnectHandler();
+              // `%load_ext ipyflow` ran and registered the comm target, so allow
+              // the self-establish fallback (the JupyterLite data-comm establish
+              // is not delivered on its own).
               commDisconnectHandler = connectToComm(
                 session,
                 notebooks,
                 nbPanel.content,
                 docManager,
+                true,
               );
             }
           };
@@ -156,13 +240,15 @@ export function setupComm(
             notebooks,
             nbPanel.content,
             docManager,
+            true,
           );
         },
       );
     };
 
-    session.ready.then(() => {
+    session.ready.then(async () => {
       clearCellState(nbPanel.content);
+      await ensureIpyflowInstalled(session);
       registerCommTarget();
       commDisconnectHandler();
       commDisconnectHandler = connectToComm(
@@ -179,7 +265,8 @@ export function setupComm(
         commDisconnectHandler();
         resetStore(session.session.id);
         commDisconnectHandler = () => resetStore(session.session.id);
-        session.ready.then(() => {
+        session.ready.then(async () => {
+          await ensureIpyflowInstalled(session);
           registerCommTarget();
           commDisconnectHandler = connectToComm(
             session,

@@ -20,8 +20,12 @@ from typing import (
 )
 
 import pyccolo as pyc
-from ipykernel.ipkernel import IPythonKernel
 from pyccolo.tracer import HIDE_PYCCOLO_FRAME, PYCCOLO_DEV_MODE_ENV_VAR
+
+try:
+    from ipykernel.ipkernel import IPythonKernel
+except ImportError:  # JupyterLite / Pyodide ships no ipykernel-based kernel
+    IPythonKernel = None  # type: ignore
 
 from ipyflow import singletons
 from ipyflow.analysis.symbol_ref import SymbolRef
@@ -217,7 +221,7 @@ class NotebookFlow(singletons.NotebookFlow):
         self._min_new_ready_cell_counter = -1
         compile_handlers_for_already_imported_modules({"ipyflow"})
 
-    def register_comm_target(self, kernel: IPythonKernel) -> None:
+    def register_comm_target(self, kernel: "Optional[IPythonKernel]" = None) -> None:
         self.comm_manager.register_comm_target(kernel)
 
     def init_virtual_symbols(self) -> None:

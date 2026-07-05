@@ -5,7 +5,14 @@ from ipyflow import singletons
 from ipyflow.shell.interactiveshell import IPyflowInteractiveShell, UsesIPyflowShell
 from ipyflow.shell.interactiveshellembed import IPyflowInteractiveShellEmbed, embed
 from ipyflow.shell.terminalinteractiveshell import IPyflowTerminalInteractiveShell
-from ipyflow.shell.zmqshell import IPyflowZMQInteractiveShell
+
+try:
+    from ipyflow.shell.zmqshell import IPyflowZMQInteractiveShell
+except ImportError:
+    # ipykernel's ZMQInteractiveShell is unavailable under JupyterLite / Pyodide;
+    # the reactive machinery lives in IPyflowInteractiveShell (plain
+    # InteractiveShell), which is what gets injected there instead.
+    IPyflowZMQInteractiveShell = None  # type: ignore
 
 if TYPE_CHECKING:
     from IPython import InteractiveShell

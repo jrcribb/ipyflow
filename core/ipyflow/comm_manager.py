@@ -5,8 +5,6 @@ import textwrap
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set
 
 import pyccolo as pyc
-from ipykernel.comm import Comm
-from ipykernel.ipkernel import IPythonKernel
 
 from ipyflow.analysis.resolved_symbols import ResolvedSymbol
 from ipyflow.analysis.symbol_ref import SymbolRef
@@ -18,6 +16,9 @@ from ipyflow.singletons import shell
 from ipyflow.types import IdType
 
 if TYPE_CHECKING:
+    from comm.base_comm import BaseComm
+    from ipykernel.ipkernel import IPythonKernel
+
     from ipyflow.flow import NotebookFlow
 
 
@@ -35,7 +36,7 @@ class CommManager:
         self._comm_handlers: Dict[
             str, Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
         ] = {}
-        self._comm: Optional[Comm] = None
+        self._comm: "Optional[BaseComm]" = None
         self.debounced_exec_schedule_pending = False
 
         # Register default handlers
@@ -62,9 +63,19 @@ class CommManager:
             "register_dynamic_comm_handler", self.handle_register_dynamic_comm_handler
         )
 
-    def register_comm_target(self, kernel: IPythonKernel) -> None:
-        """Register the comm target with the kernel."""
-        kernel.comm_manager.register_target(__package__, self._comm_target)
+    def register_comm_target(self, kernel: "Optional[IPythonKernel]" = None) -> None:
+        """Register the comm target with the kernel (or the active comm manager).
+
+        Under JupyterLite / Pyodide there is no ipykernel-based kernel object, so
+        fall back to the ``comm`` package's process-wide comm manager, which the
+        pyodide kernel dispatches incoming comm messages through.
+        """
+        comm_manager = getattr(kernel, "comm_manager", None)
+        if comm_manager is None:
+            from comm import get_comm_manager
+
+            comm_manager = get_comm_manager()
+        comm_manager.register_target(__package__, self._comm_target)
 
     def register_comm_handler(
         self,
@@ -112,7 +123,7 @@ class CommManager:
                 "unable to serialize response for request of type %s" % request_type
             ) from e
 
-    def _comm_target(self, comm: Comm, open_msg: Dict[str, Any]) -> None:
+    def _comm_target(self, comm: "BaseComm", open_msg: Dict[str, Any]) -> None:
         """Handle comm target initialization."""
 
         @comm.on_msg
