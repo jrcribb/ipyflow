@@ -60,15 +60,15 @@ echo "==> Installing the labextension into the build env (for jupyter lite build
 python -m pip install --no-deps "$ROOTDIST"/ipyflow-*.whl
 
 echo "==> Bundling pure-Python runtime deps offline (fast, robust load)"
-python -m pip download --only-binary=:all: --python-version 3.12 \
+python -m pip download --only-binary=:all: \
   --implementation py --abi none --platform any \
-  pyccolo pipescript comm black astunparse -d "$WHEELS"
+  pyccolo pipescript traitlets comm black astunparse typing-extensions -d "$WHEELS"
 # keep only universal (pure-Python) wheels
 find "$WHEELS" -name '*.whl' ! -name '*-none-any.whl' -delete || true
 echo "  bundled $(ls "$WHEELS"/*.whl | wc -l | tr -d ' ') wheels into $(basename "$WHEELS")/"
 
 echo "==> Building the JupyterLite site"
-python -m pip install jupyterlite-core jupyterlite-pyodide-kernel jupyter_server
+python -m pip install jupyterlite-core jupyterlite-pyodide-kernel jupyter-server
 jupyter lite build --contents "$HERE/content" --lite-dir "$HERE" --output-dir "$DIST"
 
 echo "==> Done. Serve locally with:  python -m http.server -d '$DIST' 8000"
