@@ -1,6 +1,13 @@
 History
 =======
 
+0.0.230 (2026-07-07)
+--------------------
+* [kernel][lab] add JupyterLite (Pyodide) support with end-to-end in-browser reactivity;
+* [kernel] fix infinite recursion between the output Tee and IPython 9's per-cell write patch;
+* [kernel] keep traceback-visible sandbox frames when filtering hidden frames, so pipescript block tracebacks pinpoint the failure;
+* [kernel] bump deps and unpin specific pyccolo version;
+
 0.0.229 (2026-06-12)
 --------------------
 * [kernel] make pipescript macros work (and stay fast) under ipyflow tracing;
