@@ -32,7 +32,7 @@ mkdir -p "$WHEELS"
 # or a system Python. The rest of the script then stays on the standard
 # `python -m pip` / `python -m build` so it behaves identically everywhere --
 # in particular `pip download` (below) has no `uv pip` equivalent.
-echo "==> Ensuring pip + build are available"
+echo "==> Ensuring pip + build + jupyter are available"
 # Bootstrap pip without hitting the network first (ensurepip ships Python's own
 # pip); only fall back to uv if that's somehow unavailable.
 python -m pip --version >/dev/null 2>&1 \
@@ -40,6 +40,7 @@ python -m pip --version >/dev/null 2>&1 \
   || { command -v uv >/dev/null 2>&1 && uv pip install pip; }
 # the PEP 517 build frontend; install only if it isn't already present
 python -c "import build" >/dev/null 2>&1 || python -m pip install --quiet build
+python -c "import jupyter" >/dev/null 2>&1 || python -m pip install --quiet jupyter
 
 echo "==> Building the ipyflow federated labextension"
 pushd "$ROOT/frontend/labextension" >/dev/null
