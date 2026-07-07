@@ -16,16 +16,36 @@ class Tee:
     def __init__(self, out1, out2):
         self.out1 = out1
         self.out2 = out2
+        self._in_write = False
 
     def __getattr__(self, item):
-        if item in ("out1", "out2"):
+        if item in ("out1", "out2", "_in_write"):
             raise AttributeError()
         # delegate to the first output stream
         return getattr(self.out1, item)
 
     def write(self, data):
-        self.out1.write(data)
-        self.out2.write(data)
+        if self._in_write:
+            # Reentrant call. IPython >= 9 wraps ``sys.stdout.write`` per-cell (see
+            # ``InteractiveShell._tee``) to mirror output into its history. Because
+            # our ``StdstreamProxy`` routes ``.write`` through this ``Tee`` and
+            # redirects the resulting write-attribute assignment onto ``out1`` (the
+            # real stream), the wrapper's captured "original" write can point right
+            # back at ``Tee.write`` -- so writing to ``out1`` re-enters here and
+            # recurses infinitely. Break the cycle by sending the reentrant write
+            # straight to the underlying stream via its *class* ``write``, bypassing
+            # the instance-level monkeypatch.
+            cls_write = getattr(type(self.out1), "write", None)
+            if cls_write is not None:
+                return cls_write(self.out1, data)
+            return None
+        self._in_write = True
+        try:
+            result = self.out1.write(data)
+            self.out2.write(data)
+            return result
+        finally:
+            self._in_write = False
 
     def flush(self):
         self.out1.flush()
