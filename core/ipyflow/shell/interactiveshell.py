@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 from contextlib import contextmanager, suppress
-from types import FrameType
 from typing import (
     Any,
     Callable,
@@ -21,13 +20,7 @@ from typing import (
 import pyccolo as pyc
 from IPython import get_ipython
 from IPython.core.interactiveshell import ExecutionResult, InteractiveShell
-from pyccolo.emit_event import SANDBOX_FNAME_PREFIX, is_traceback_visible
-from pyccolo.import_hooks import TraceFinder
-from pyccolo.tracer import (
-    HIDE_PYCCOLO_FRAME,
-    PYCCOLO_DEV_MODE_ENV_VAR,
-    TRACED_LAMBDA_NAME,
-)
+from pyccolo.tracer import PYCCOLO_DEV_MODE_ENV_VAR
 
 from ipyflow import singletons
 from ipyflow.config import Interface
@@ -42,8 +35,6 @@ from ipyflow.tracing.interrupt_tracer import InterruptTracer
 from ipyflow.tracing.ipyflow_tracer import DataflowTracer, StackFrameManager
 from ipyflow.tracing.output_recorder import OutputRecorder
 from ipyflow.utils.ipython_utils import (
-    ast_transformer_context,
-    input_transformer_context,
     make_mro_inserter_metaclass,
     print_purple,
     save_number_of_currently_executing_cell,
@@ -60,22 +51,41 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
     prev_shell_class: Optional[Type[InteractiveShell]] = None
     replacement_class: Optional[Type[InteractiveShell]] = None
 
+    # Tells pyccolo's own IPython extension that this shell drives pyccolo's cell
+    # tracing driver itself, so it must not install its native adapter on top.
+    uses_pyccolo_driver = True
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._initialize()
 
+    @property
+    def tee_output_tracer(self) -> OutputRecorder:
+        # A property rather than an attribute: deregistering a tracer clears its
+        # singleton, so a cached instance can go stale under us.
+        return OutputRecorder.instance()
+
     def _initialize(self) -> None:
-        self.tee_output_tracer = OutputRecorder.instance()
-        self.registered_tracers: List[Type[pyc.BaseTracer]] = [
-            OutputRecorder,
-            DataflowTracer,
-            InterruptTracer,
+        # Take ownership of pyccolo's cell tracing driver, then teach it the few
+        # things it can't know about ipyflow: which rewriter to build, which
+        # implicit tracers to add, and what to run around each cell. The driver
+        # owns the tracer registry, ``_TRACER_STACK`` bookkeeping, the input/AST
+        # transformers, and the enable/disable lifecycle.
+        driver = pyc.take_over_ipython_driver(self)
+        driver.rewriter_factory = self._make_ast_rewriter
+        driver.extra_tracers = self._implicit_tracers
+        driver.cell_contexts = [
+            self._patch_pyccolo_exec_eval,
+            self.inner_tracing_context,
         ]
-        self.tracer_cleanup_callbacks: List[Callable] = []
-        self.tracer_cleanup_pending: bool = False
+        driver.on_cell_start = [self._on_cell_start]
+        driver.on_cell_end = [self._on_cell_end]
+        for tracer_cls in (OutputRecorder, DataflowTracer, InterruptTracer):
+            pyc.register_ipython_tracer(
+                tracer_cls, priority=pyc.HOST_TRACER_PRIORITY, shell=self
+            )
         self.syntax_transforms_enabled: bool = True
         self.syntax_transforms_only: bool = False
-        self._saved_meta_path_entries: List[TraceFinder] = []
         self._has_cell_id: bool = (
             "cell_id" in inspect.signature(super()._run_cell).parameters
         )
@@ -90,10 +100,16 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
             "run_cell_async"
         )
         self._should_capture_output = False
-        for qualified_tracer_cls_name in reversed(
-            getattr(self.config.ipyflow, "extra_pyccolo_tracers", [])
+        # Registration order is now canonical, so these no longer need reversing.
+        for qualified_tracer_cls_name in getattr(
+            self.config.ipyflow, "extra_pyccolo_tracers", []
         ):
             register_tracer(qualified_tracer_cls_name, shell_=self)
+
+    @property
+    def registered_tracers(self) -> List[Type[pyc.BaseTracer]]:
+        """The driver's registry. Retained as a property for backwards compat."""
+        return pyc.registered_ipython_tracers(shell=self)
 
     @classmethod
     def instance(cls, *args, **kwargs) -> "IPyflowInteractiveShell":
@@ -123,13 +139,6 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         get_ipython().__class__ = shell_class.replacement_class
         shell_class.replacement_class = None
 
-    def cleanup_tracers(self):
-        self._restore_meta_path()
-        for cleanup in reversed(self.tracer_cleanup_callbacks):
-            cleanup()
-        self.tracer_cleanup_callbacks.clear()
-        self.tracer_cleanup_pending = False
-
     def cell_counter(self):
         return singletons.flow().cell_counter()
 
@@ -137,30 +146,6 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         cur_cell = Cell.current_cell()
         cell_name = cur_cell.make_ipython_name()
         return cell_name
-
-    @contextmanager
-    def _patch_tracer_filters(
-        self,
-        tracer: pyc.BaseTracer,
-    ) -> Generator[None, None, None]:
-        orig_passes_filter = tracer.__class__.file_passes_filter_for_event
-        orig_checker = tracer.__class__.should_instrument_file
-        try:
-            if not isinstance(tracer, StackFrameManager) or isinstance(
-                tracer, DataflowTracer
-            ):
-                tracer.__class__.file_passes_filter_for_event = (  # type: ignore[method-assign]
-                    lambda *args: tracer.__class__ in self.registered_tracers
-                    and orig_passes_filter(*args)
-                )
-            tracer.__class__.should_instrument_file = (  # type: ignore[method-assign]
-                lambda *args: tracer.__class__ in self.registered_tracers
-                and orig_checker(*args)
-            )
-            yield
-        finally:
-            tracer.__class__.file_passes_filter_for_event = orig_passes_filter  # type: ignore[method-assign]
-            tracer.__class__.should_instrument_file = orig_checker  # type: ignore[method-assign]
 
     @contextmanager
     def _eval_tracing_disabled(self):
@@ -264,108 +249,67 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
             all_syntax_augmenters.append(tracer.make_syntax_augmenter(ast_rewriter))
         return ast_rewriter, all_syntax_augmenters
 
-    @contextmanager
-    def _syntax_transform_only_tracing_context(
-        self, syntax_transforms_enabled: bool, all_tracers, ast_rewriter=None
-    ):
-        if syntax_transforms_enabled and all_tracers:
-            ast_rewriter = ast_rewriter or DataflowTracer.instance().make_ast_rewriter(
-                self.make_ipython_cell_name(), module_id=self.cell_counter()
-            )
-            _, all_syntax_augmenters = self.make_rewriter_and_syntax_augmenters(
-                tracers=all_tracers, ast_rewriter=ast_rewriter
-            )
-        else:
-            all_syntax_augmenters = []
-        with input_transformer_context(all_syntax_augmenters):
-            yield
+    def cleanup_tracers(self) -> None:
+        """Evict the resident pyccolo tracers from ``_TRACER_STACK``."""
+        pyc.ipython_driver(self)._teardown_tracing()
 
-    def _restore_meta_path(self) -> None:
-        while self._saved_meta_path_entries:
-            sys.meta_path.insert(0, self._saved_meta_path_entries.pop())
+    # --- pyccolo cell tracing driver hooks ---------------------------------
 
-    @contextmanager
-    def _tracing_context(self, syntax_transforms_enabled: bool):
-        self.before_enter_tracing_context()
+    def _make_ast_rewriter(
+        self,
+        tracers: List[pyc.BaseTracer],
+        path: str,
+        module_id: Optional[int],
+    ) -> pyc.AstRewriter:
+        return DataflowAstRewriter(tracers, path=path, module_id=module_id)  # type: ignore[arg-type]
 
-        try:
-            all_tracers = [
-                tracer.instance()
-                for tracer in self.registered_tracers
-                if tracer is not OutputRecorder or self._should_capture_output
-            ]
-            if self.syntax_transforms_only:
-                with self._syntax_transform_only_tracing_context(
-                    syntax_transforms_enabled, all_tracers
-                ):
-                    yield
-                return
-            else:
-                self._restore_meta_path()
-            if any(tracer.has_sys_trace_events for tracer in all_tracers):
-                if not any(
-                    isinstance(tracer, StackFrameManager) for tracer in all_tracers
-                ):
-                    # TODO: decouple this from the dataflow tracer
-                    StackFrameManager.clear_instance()
-                    all_tracers.append(StackFrameManager.instance())
-            cell_name = self.make_ipython_cell_name()
-            singletons.flow().set_name_to_cell_num_mapping(
-                cell_name, self.execution_count
-            )
-            for tracer in all_tracers:
-                tracer._tracing_enabled_files.add(cell_name)
-                tracer.reset()
-            if DataflowTracer.instance() in all_tracers:
-                DataflowTracer.instance().init_symtab()
-            with pyc.multi_context(
-                [self._patch_tracer_filters(tracer) for tracer in all_tracers]
+    def _implicit_tracers(self, tracers: List[pyc.BaseTracer]) -> List[pyc.BaseTracer]:
+        """Adjust the registry's tracers to what *this* cell actually needs."""
+        tracers = [
+            tracer
+            for tracer in tracers
+            if not isinstance(tracer, OutputRecorder) or self._should_capture_output
+        ]
+        if any(tracer.has_sys_trace_events for tracer in tracers) and not any(
+            isinstance(tracer, StackFrameManager) for tracer in tracers
+        ):
+            # TODO: decouple this from the dataflow tracer
+            if (
+                StackFrameManager.initialized()
+                and type(StackFrameManager.instance()) is not StackFrameManager
             ):
-                if len(self.tracer_cleanup_callbacks) == 0:
-                    for idx, tracer in enumerate(all_tracers):
-                        self.tracer_cleanup_callbacks.append(
-                            tracer.tracing_non_context(
-                                do_patch_meta_path=idx == len(all_tracers) - 1
-                            )
-                        )
-                else:
-                    for tracer in all_tracers:
-                        tracer._enable_tracing(check_disabled=False)
-                if all_tracers:
-                    ast_rewriter = DataflowTracer.instance().make_ast_rewriter(
-                        cell_name, module_id=self.cell_counter()
-                    )
-                else:
-                    ast_rewriter = None
-                if ast_rewriter is None:
-                    yield
-                else:
-                    with self._syntax_transform_only_tracing_context(
-                        syntax_transforms_enabled,
-                        all_tracers,
-                        ast_rewriter=ast_rewriter,
-                    ):
-                        with ast_transformer_context([ast_rewriter]):
-                            with self._patch_pyccolo_exec_eval():
-                                with self.inner_tracing_context():
-                                    yield
-                if DataflowTracer.instance() in all_tracers:
-                    DataflowTracer.instance().finish_cell_hook()
-                if self.tracer_cleanup_pending:
-                    self.cleanup_tracers()
-                else:
-                    for tracer in reversed(all_tracers):
-                        tracer._disable_tracing(check_enabled=False)
-                    # remove pyccolo meta path entries when not executing as they seem to
-                    # mess up completions
-                    while len(sys.meta_path) > 0 and isinstance(
-                        sys.meta_path[0], TraceFinder
-                    ):
-                        self._saved_meta_path_entries.append(sys.meta_path[0])
-                        sys.meta_path.pop(0)
-        except Exception:
-            logger.exception("encountered an exception")
-            raise
+                # ``DataflowTracer`` is a ``StackFrameManager``, and traitlets
+                # shares ``_instance`` up the MRO, so a deregistered dataflow
+                # tracer would otherwise be handed back to us here.
+                StackFrameManager.clear_instance()
+            tracers.append(StackFrameManager.instance())
+        return tracers
+
+    def _on_cell_start(self, cell: pyc.CellInfo) -> None:
+        self.before_enter_tracing_context()
+        if cell.cell_name is not None:
+            singletons.flow().set_name_to_cell_num_mapping(
+                cell.cell_name, self.execution_count
+            )
+        if DataflowTracer.instance() in cell.tracers:
+            DataflowTracer.instance().init_symtab()
+
+    def _on_cell_end(self, cell: pyc.CellInfo) -> None:
+        if DataflowTracer.instance() in cell.tracers:
+            DataflowTracer.instance().finish_cell_hook()
+
+    @contextmanager
+    def _tracing_context(self, raw_cell: str, syntax_transforms_enabled: bool):
+        driver = pyc.ipython_driver(self)
+        driver.syntax_transforms_enabled = syntax_transforms_enabled
+        driver.syntax_transforms_only = self.syntax_transforms_only
+        with pyc.cell_tracing_context(
+            self,
+            raw_cell,
+            cell_name=self.make_ipython_cell_name(),
+            module_id=self.cell_counter(),
+        ):
+            yield
 
     def _is_code_empty(self, code: str) -> bool:
         return self.input_transformer_manager.transform_cell(code).strip() == ""
@@ -494,6 +438,7 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
         try:
             with (
                 self._tracing_context(
+                    raw_cell,
                     self.syntax_transforms_enabled
                     # disable syntax transforms for cell magics
                     and not raw_cell.strip().startswith("%%"),
@@ -785,31 +730,9 @@ class IPyflowInteractiveShell(singletons.IPyflowShell, InteractiveShell):
 
     @staticmethod
     def filter_hidden_frames(tb) -> None:
-        prev = None
-        while tb is not None:
-            should_filter = False
-            frame: FrameType = tb.tb_frame
-            if prev is not None:
-                fname = frame.f_code.co_filename
-                should_filter = frame.f_locals.get(HIDE_PYCCOLO_FRAME, False)
-                # Keep sandbox frames that carry meaningful user source (e.g. a
-                # compiled pipescript block / stage), marked in the shared
-                # pyccolo registry, so they pinpoint the failure.
-                should_filter = should_filter or (
-                    fname.startswith(SANDBOX_FNAME_PREFIX)
-                    and not is_traceback_visible(fname)
-                )
-                should_filter = should_filter or frame.f_code.co_name in (
-                    TRACED_LAMBDA_NAME,
-                    "_patched_eval",
-                    "_patched_tracer_eval",
-                )
-                should_filter = should_filter or "pyccolo" in fname
-            if should_filter and prev is not None:
-                prev.tb_next = tb.tb_next
-            else:
-                prev = tb
-            tb = tb.tb_next
+        # pyccolo owns the one implementation; kept as a staticmethod so the
+        # subclass hook (and anything that overrides it) still works.
+        pyc.filter_hidden_frames(tb)
 
     def showtraceback(self, exc_tuple=None, *args, **kwargs):
         # filters frames from pyccolo

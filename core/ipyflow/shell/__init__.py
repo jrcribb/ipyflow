@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from typing import TYPE_CHECKING
 
+import pyccolo as pyc
+
 from ipyflow import singletons
 from ipyflow.shell.interactiveshell import IPyflowInteractiveShell, UsesIPyflowShell
 from ipyflow.shell.interactiveshellembed import IPyflowInteractiveShellEmbed, embed
@@ -43,3 +45,6 @@ def unload_ipython_extension(ipy: "InteractiveShell") -> None:
     cur_shell_cls = ipy.__class__
     assert cur_shell_cls.prev_shell_class is not None  # type: ignore
     cur_shell_cls.replacement_class = cur_shell_cls.prev_shell_class  # type: ignore
+    # Hand the cell tracing driver back. If `%load_ext pyccolo` is still in
+    # effect it reinstalls its own adapter; otherwise it tears everything down.
+    pyc.release_ipython_driver(ipy)

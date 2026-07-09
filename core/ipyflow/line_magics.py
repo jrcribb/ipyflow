@@ -467,76 +467,60 @@ def set_reactivity(line_: str) -> None:
     settings.reactivity_mode = reactivity
 
 
-def _resolve_tracer_class(name: str) -> Optional[Type[pyc.BaseTracer]]:
-    if "." in name:
-        try:
-            return pyc.resolve_tracer(name)
-        except ImportError:
-            return None
-    elif name == "dataflow":
+def _resolve_tracer_class(
+    name: str, shell_: Optional["IPyflowInteractiveShell"] = None
+) -> Optional[Type[pyc.BaseTracer]]:
+    """Resolve ``name`` to a tracer class.
+
+    pyccolo handles dotted paths, user-namespace names, classes, and instances.
+    On top of that we keep ipyflow's two extras: the ``dataflow`` alias, and
+    falling back to an ipyflow symbol when the name isn't in the user namespace.
+    """
+    if name == "dataflow":
         from ipyflow.tracing.ipyflow_tracer import DataflowTracer
 
         return DataflowTracer
-    else:
-        tracer_cls = get_ipython().ns_table["user_global"].get(name, None)
-        if tracer_cls is not None:
-            return tracer_cls
-        syms = resolve_rval_symbols(name, should_update_usage_info=False)
-        if len(syms) == 1:
-            return next(iter(syms)).obj
-        else:
-            return None
-
-
-def _deregister_tracers(tracers, shell_: Optional["IPyflowInteractiveShell"] = None):
-    (shell_ or shell()).tracer_cleanup_pending = True
-    for tracer in tracers:
-        tracer.clear_instance()
-        try:
-            (shell_ or shell()).registered_tracers.remove(tracer)
-        except ValueError:
-            pass
-
-
-def _deregister_tracers_for(
-    tracer_cls, shell_: Optional["IPyflowInteractiveShell"] = None
-) -> None:
-    _deregister_tracers(
-        [tracer_cls]
-        + [
-            tracer
-            for tracer in (shell_ or shell()).registered_tracers
-            if tracer.__name__ == tracer_cls.__name__
-        ],
-        shell_=shell_,
-    )
+    shell_ = shell_ or shell()
+    try:
+        return pyc.coerce_tracer_class(name, shell_)
+    except (ImportError, TypeError, ValueError):
+        pass
+    syms = resolve_rval_symbols(name, should_update_usage_info=False)
+    if len(syms) != 1:
+        return None
+    try:
+        return pyc.coerce_tracer_class(next(iter(syms)).obj, shell_)
+    except (TypeError, ValueError):
+        return None
 
 
 def register_tracer(
     line_: str, shell_: Optional["IPyflowInteractiveShell"] = None
 ) -> None:
+    """Thin alias for ``pyc.register_ipython_tracer``, which owns the registry."""
     line_ = line_.strip()
     usage = "Usage: %flow register_tracer <module.path.to.tracer_class>"
-    tracer_cls = _resolve_tracer_class(line_)
+    tracer_cls = _resolve_tracer_class(line_, shell_)
     if tracer_cls is None:
         warn(usage)
         return
-    _deregister_tracers_for(tracer_cls, shell_=shell_)
-    tracer_cls.instance()
-    (shell_ or shell()).registered_tracers.insert(0, tracer_cls)
+    pyc.register_ipython_tracer(tracer_cls, shell=shell_ or shell())
 
 
-def deregister_tracer(line_: str) -> None:
+def deregister_tracer(
+    line_: str, shell_: Optional["IPyflowInteractiveShell"] = None
+) -> None:
     line_ = line_.strip()
     usage = "Usage: %flow deregister_tracer [<module.path.to.tracer_class>|all]"
+    shell_ = shell_ or shell()
     if line_.lower() == "all":
-        _deregister_tracers(list(shell().registered_tracers))
-    else:
-        tracer_cls = _resolve_tracer_class(line_)
-        if tracer_cls is None:
-            warn(usage)
-            return
-        _deregister_tracers_for(tracer_cls)
+        pyc.ipython_driver(shell_).deregister_all()
+        return
+    tracer_cls = _resolve_tracer_class(line_, shell_)
+    if tracer_cls is None:
+        warn(usage)
+        return
+    pyc.deregister_ipython_tracer(tracer_cls, shell=shell_)
 
 
 def register_annotations(line_: str) -> None:

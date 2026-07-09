@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-import ast
 import logging
 from contextlib import contextmanager
-from typing import Callable, Generator, List, Optional
+from typing import Generator, Optional
 
 from IPython.core.interactiveshell import ExecutionResult
 from traitlets import MetaHasTraits
@@ -25,28 +24,6 @@ class _IpythonState:
         finally:
             self.cell_counter = None
 
-    @contextmanager
-    def ast_transformer_context(
-        self, transformers: List[ast.NodeTransformer]
-    ) -> Generator[None, None, None]:
-        old = shell().ast_transformers
-        shell().ast_transformers = old + transformers
-        try:
-            yield
-        finally:
-            shell().ast_transformers = old
-
-    @contextmanager
-    def input_transformer_context(
-        self, transformers: List[Callable[[List[str]], List[str]]]
-    ) -> Generator[None, None, None]:
-        old = shell().input_transformers_post
-        shell().input_transformers_post = old + transformers
-        try:
-            yield
-        finally:
-            shell().input_transformers_post = old
-
 
 _IPY = _IpythonState()
 
@@ -54,18 +31,6 @@ _IPY = _IpythonState()
 @contextmanager
 def save_number_of_currently_executing_cell() -> Generator[None, None, None]:
     with _IPY.save_number_of_currently_executing_cell():
-        yield
-
-
-@contextmanager
-def ast_transformer_context(transformers) -> Generator[None, None, None]:
-    with _IPY.ast_transformer_context(transformers):
-        yield
-
-
-@contextmanager
-def input_transformer_context(transformers) -> Generator[None, None, None]:
-    with _IPY.input_transformer_context(transformers):
         yield
 
 
