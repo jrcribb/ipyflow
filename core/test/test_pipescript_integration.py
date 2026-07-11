@@ -555,6 +555,5 @@ def test_pipescript_block_traceback_diagnosis_and_pinpointing():
     # the block frame is meaningfully named and kept visible by ipyflow's filter
     frames = shell().user_ns["_frames"]
     assert any(
-        name == "map{...}" and pyc.is_traceback_visible(fname)
-        for name, fname in frames
+        name == "map{...}" and pyc.is_traceback_visible(fname) for name, fname in frames
     ), frames
