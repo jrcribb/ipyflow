@@ -5,7 +5,7 @@ These are the user-facing helpers re-exported at the top level of ``ipyflow``
 (``from ipyflow import deps, users, code, ...``). Each symbol-introspection helper
 takes the *value* of a notebook symbol; a tracer hook resolves it to the
 corresponding :class:`~ipyflow.data_model.symbol.Symbol`. See
-:doc:`../guides/introspection_api` for worked examples.
+:doc:`../guides/dataflow_api` for worked examples.
 
 Symbol introspection
 --------------------

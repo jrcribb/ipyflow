@@ -42,6 +42,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
+    "ipyflow_cells",
 ]
 
 # Every worked example in the guides/getting-started pages is a runnable
@@ -83,3 +84,4 @@ html_theme_options = {
 # Custom static files (CSS overrides, etc.), copied after the builtin static
 # files so a same-named file overrides the theme default.
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]

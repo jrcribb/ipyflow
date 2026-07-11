@@ -1,0 +1,24 @@
+/* Give the doctested `.. cell::` / `.. cell-output::` blocks a subtle
+   notebook-like feel: input cells get a blue accent, outputs a muted one that
+   reads as "this is what the cell produced". */
+
+.ipyflow-cell {
+    border-left: 3px solid #4c8bf5;
+}
+
+.ipyflow-output {
+    border-left: 3px solid #b0b7c3;
+    margin-top: -8px;   /* visually connect output to the cell above it */
+}
+
+.ipyflow-output pre {
+    background: #f6f8fa;
+    color: #24292e;
+}
+
+@media (prefers-color-scheme: dark) {
+    .ipyflow-output pre {
+        background: #1b1f23;
+        color: #d1d5da;
+    }
+}

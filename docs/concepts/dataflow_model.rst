@@ -26,16 +26,37 @@ Timestamps are how ipyflow reasons about "before" and "after". A symbol is
 **stale** when one of its dependencies carries a newer timestamp than the symbol
 itself -- that comparison is the heart of staleness detection.
 
-.. testcode::
+.. cell::
+   :reset:
 
-   run_cell("a = 1")            # a updated at cell 1
-   run_cell("b = a + 1")        # b updated at cell 2
-   run_cell("assert timestamp(a).cell_num == 1")
-   run_cell("assert timestamp(b).cell_num == 2")
-   # Re-running a gives it a newer timestamp than b, so b is now stale.
-   run_cell("a = 2")
-   run_cell("assert timestamp(a).cell_num > timestamp(b).cell_num")
-   run_cell("assert lift(b).is_waiting")
+   a = 1
+
+.. cell::
+
+   b = a + 1
+
+.. cell::
+
+   print(timestamp(a), timestamp(b))
+
+.. cell-output::
+
+   Timestamp(cell_num=1, stmt_num=0) Timestamp(cell_num=2, stmt_num=0)
+
+Re-running the first cell gives ``a`` a newer timestamp than ``b``, so ``b`` is
+now stale -- which is exactly what ipyflow flags in the UI:
+
+.. cell::
+
+   a = 2
+
+.. cell::
+
+   print(lift(b).is_waiting)
+
+.. cell-output::
+
+   True
 
 Symbol
 ------

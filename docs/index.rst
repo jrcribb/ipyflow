@@ -1,71 +1,74 @@
 ipyflow
 =======
 
-**ipyflow** is a next-generation Python kernel for JupyterLab and Notebook 7 that
-tracks fine-grained dataflow relationships between the symbols and cells of an
-interactive session. It uses `pyccolo <https://pyccolo.readthedocs.io>`_ to
-instrument executing code, building a live dataflow graph that powers reactive
-execution, staleness detection, program slicing, and memoization -- all as a
-*drop-in* superset of the stock ``ipykernel``.
+**ipyflow** is a reactive Python kernel for JupyterLab and Notebook 7. As you run
+cells, it tracks how values flow between them and builds a live dataflow graph --
+which it uses to keep your notebook consistent: run any cell and its outputs (and
+those of the cells it depends on) appear as they would after a clean
+*restart-and-run-all*. It's a drop-in superset of the standard ``ipykernel``, so
+your notebooks keep working exactly as before.
 
-Where the `README <https://github.com/ipyflow/ipyflow>`_ gives the tour and the
-screenshots, this documentation is a code-level reference: it explains the
-model ipyflow builds, documents the programmatic dataflow API, and catalogs the
-``%flow`` magic. Every worked example below is executed against a live ipyflow
-kernel when the docs are built (via ``sphinx.ext.doctest``), so what you read is
-what the current release actually does.
+.. image:: https://raw.githubusercontent.com/ipyflow/ipyflow/master/img/ipyflow-tldr.gif
+   :alt: Running one cell reactively updates the cells that depend on it
+   :width: 600
+   :align: center
 
-A taste
--------
+Two minutes in
+--------------
 
-ipyflow watches assignments and usages as cells run and records who depends on
-whom. The programmatic API lets you interrogate that graph directly:
+.. code-block:: bash
 
-.. testcode::
+   pip install ipyflow
 
-   run_cell("x = 0")
-   run_cell("y = x + 1")
+Then pick **Python 3 (ipyflow)** from the Launcher and start a notebook. The
+:doc:`getting_started/reactive_notebooks` tour shows what reactive execution looks
+like; the rest of these docs go deep on the settings, the programmatic dataflow
+API, and how the model works underneath.
 
-   # `deps` / `users` report the immediate neighbors in the dataflow graph.
-   run_cell("assert deps(y) == [lift(x)]")
-   run_cell("assert users(x) == [lift(y)]")
+Prefer to poke at it first? A full ipyflow runs in your browser with no install
+via the `JupyterLite demo
+<https://ipyflow.github.io/ipyflow/lab/index.html?path=demo.ipynb>`_.
 
-   # `code` reconstructs the minimal program slice that produces a symbol.
-   run_cell("assert str(code(y)) == '# Cell 1\\nx = 0\\n\\n# Cell 2\\ny = x + 1'")
+The graph, from Python
+----------------------
 
-Each ``run_cell(...)`` above stands in for executing a notebook cell. In a real
-JupyterLab session you would simply type the code into cells; ipyflow tracks the
-same graph either way.
+The same dataflow graph that drives the UI is queryable. For example, ``deps``
+reports a value's immediate dependencies:
 
-Why ipyflow
------------
+.. cell::
+   :reset:
 
-- **Precise dependency inference.** ipyflow understands dependencies below the
-  variable level -- it knows cell ``B`` depends on ``x[0]`` and will not react to
-  an unrelated change to ``x[1]``, keeping re-execution to a minimum.
-- **Fearless execution.** With reactive mode enabled, executing any cell makes
-  its output (and that of its upstream and downstream cells) appear exactly as it
-  would after a *restart-and-run-all*.
-- **A queryable model.** The same graph that drives the UI is available to you as
-  a Python API, so you can slice, trace provenance, and recover prior outputs
-  programmatically.
+   x = 0
 
-Try it in the browser (no install) via the
-`JupyterLite demo <https://ipyflow.github.io/ipyflow/lab/index.html?path=demo.ipynb>`_.
+.. cell::
+
+   y = x + 1
+
+.. cell::
+
+   print(deps(y))
+
+.. cell-output::
+
+   [<x>]
+
+Every worked example in these docs -- like the one above -- is executed against a
+live ipyflow kernel when the docs are built, so what you read matches what the
+current release actually does.
 
 .. toctree::
    :maxdepth: 2
    :caption: Getting started
 
    getting_started/installation
-   getting_started/first_notebook
+   getting_started/reactive_notebooks
 
 .. toctree::
    :maxdepth: 2
    :caption: Guides
 
-   guides/reactive_execution
-   guides/introspection_api
+   guides/execution
+   guides/dataflow_api
    guides/memoization
 
 .. toctree::

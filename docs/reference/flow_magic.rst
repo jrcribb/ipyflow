@@ -4,7 +4,7 @@ The ``%flow`` magic
 ``%flow`` is ipyflow's line magic for inspecting and configuring a session. It is
 registered automatically when ipyflow loads. This page catalogs its subcommands;
 several are demonstrated as executable examples elsewhere in these docs (see
-:doc:`../guides/reactive_execution` and :doc:`../concepts/slicing`).
+:doc:`../guides/execution` and :doc:`../concepts/slicing`).
 
 Any subcommand's output can be redirected to a file with a trailing ``> path``,
 e.g. ``%flow slice 4 > slice.py``.
@@ -33,8 +33,7 @@ Inspecting the graph
     - ``--stmt`` / ``--stmts`` -- slice at statement granularity (implies
       ``--blacken``).
     - ``--blacken`` -- reformat the result with ``black``.
-    - ``--tag <tag>`` -- slice the cells carrying a tag instead of a cell number
-      (a ``$``-prefixed tag additionally marks the current cell reactive for it).
+    - ``--tag <tag>`` -- slice the cells carrying a tag instead of a cell number.
     - ``--noheader`` -- omit the ``# Cell N`` headers.
 
     The standalone ``%histslice <cell_num>`` magic is shorthand for ``%flow slice
@@ -96,9 +95,9 @@ Toggles and lifecycle
     Toggle linting of out-of-order usages.
 
 ``%flow syntax_transforms [on|off]``
-    Enable or disable the source syntax transforms (including the ``$`` reactive
-    syntax). ``%flow syntax_transforms_only`` keeps the transforms while disabling
-    dataflow capture.
+    Enable or disable ipyflow's source syntax transforms.
+    ``%flow syntax_transforms_only`` keeps the transforms while disabling dataflow
+    capture.
 
 ``%flow trace_messages [enable|disable]``
     Toggle verbose tracer message logging (a debugging aid).
