@@ -13,22 +13,51 @@ class EnumWithDefault(Enum):
 
 
 class ExecutionMode(EnumWithDefault):
+    """Whether executing a cell also re-runs its stale dependencies.
+
+    Set with ``%flow mode``. ``LAZY`` is the default and matches stock
+    ``ipykernel`` (only the executed cell runs); ``REACTIVE`` additionally re-runs
+    stale upstream and downstream cells in dependency order.
+    """
+
     LAZY = __default__ = "lazy"  # type: ignore
     REACTIVE = "reactive"
 
 
 class ExecutionSchedule(EnumWithDefault):
+    """How the set of cells to (re-)run is computed.
+
+    Set with ``%flow schedule``. ``DAG_BASED`` (the default) uses the dynamic
+    dataflow graph; ``LIVENESS_BASED`` uses static liveness analysis of cell
+    source; ``HYBRID_DAG_LIVENESS_BASED`` combines both and is required for
+    incremental reactivity.
+    """
+
     LIVENESS_BASED = "liveness_based"
     DAG_BASED = __default__ = "dag_based"  # type: ignore
     HYBRID_DAG_LIVENESS_BASED = "hybrid_dag_liveness_based"
 
 
 class FlowDirection(EnumWithDefault):
+    """Which dependency edges may drive reactive execution.
+
+    Set with ``%flow direction``. ``IN_ORDER`` (the default) only lets a cell
+    trigger cells that appear after it in the notebook; ``ANY_ORDER`` ignores
+    spatial position.
+    """
+
     ANY_ORDER = "any_order"
     IN_ORDER = __default__ = "in_order"  # type: ignore
 
 
 class Highlights(EnumWithDefault):
+    """Which cells the frontend visually highlights.
+
+    Set with ``%flow hls`` / ``%flow nohls``. ``EXECUTED`` (the default)
+    highlights cells that ran; ``REACTIVE`` highlights reactive updates; ``ALL``
+    and ``NONE`` show everything or nothing.
+    """
+
     ALL = "all"
     NONE = "none"
     EXECUTED = __default__ = "executed"  # type: ignore
@@ -36,6 +65,13 @@ class Highlights(EnumWithDefault):
 
 
 class ReactivityMode(EnumWithDefault):
+    """Whether reactive updates are applied all at once or one cell at a time.
+
+    Set with ``%flow reactivity``. ``BATCH`` (the default) recomputes the whole
+    affected set together; ``INCREMENTAL`` applies updates one step at a time and
+    requires a liveness-aware :class:`ExecutionSchedule`.
+    """
+
     BATCH = __default__ = "batch"  # type: ignore
     INCREMENTAL = "incremental"
 
@@ -106,6 +142,7 @@ class MutableDataflowSettings(JsonSerializableMixin):
     is_dev_mode: bool
 
     def slicing_contexts(self) -> List[SlicingContext]:
+        """Return the currently-enabled slicing contexts (dynamic and/or static)."""
         ret: List[SlicingContext] = []
         if self.dynamic_slicing_enabled:
             ret.append(SlicingContext.DYNAMIC)

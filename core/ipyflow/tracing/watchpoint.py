@@ -3,6 +3,13 @@ from typing import Any, Callable, Optional, Tuple
 
 
 class Watchpoint:
+    """A single named predicate evaluated whenever a watched symbol is written.
+
+    The predicate is called as ``pred(obj, position=(cell_num, stmt_num),
+    symbol_name=...)`` and should return a truthy value when the watchpoint
+    condition is met. A ``None`` predicate always passes.
+    """
+
     def __init__(
         self, name: Optional[str], pred: Optional[Callable[..., bool]]
     ) -> None:
@@ -31,6 +38,13 @@ class Watchpoint:
 
 
 class Watchpoints(list):
+    """The collection of :class:`Watchpoint` objects registered on a symbol.
+
+    Obtain one with ``watchpoints(sym)``. It behaves like a read-only list; add
+    watchpoints with :meth:`add` rather than the usual list-mutation methods
+    (which are disabled).
+    """
+
     def append(self, *args, **kwargs) -> None:
         raise NotImplementedError("please use the `add` method instead")
 
@@ -49,6 +63,13 @@ class Watchpoints(list):
     def add(
         self, pred: Optional[Callable[..., bool]] = None, name: Optional[str] = None
     ):
+        """Register a watchpoint.
+
+        :param pred: a callable invoked as ``pred(obj, position=(cell_num,
+            stmt_num), symbol_name=...)`` on each write to the watched symbol,
+            returning truthy when the condition is met. ``None`` always passes.
+        :param name: an optional label for the watchpoint (used in ``repr``).
+        """
         super().append(Watchpoint(name, pred))
 
     def passing(

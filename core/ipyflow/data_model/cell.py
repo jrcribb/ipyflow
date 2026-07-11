@@ -76,6 +76,16 @@ class CheckerResult(NamedTuple):
 
 
 class Cell(SliceableMixin):
+    """A notebook code cell and its place in the dataflow graph.
+
+    Each ``Cell`` records the frontend ``cell_id``, the execution counter
+    ``cell_ctr`` at which it ran, its source ``content``, its ``tags``, and its
+    ``position`` in the notebook. Cell-to-cell dataflow edges are derived from the
+    symbol edges the tracer records. Access cells with the ``cells()`` accessor:
+    ``cells()`` returns this class (use classmethods like ``at_counter`` and
+    ``current_cell``), and ``cells(id)`` returns a specific instance.
+    """
+
     _current_cell_by_cell_id: Dict[IdType, "Cell"] = {}
     _cell_by_cell_ctr: Dict[int, "Cell"] = {}
     _cell_counter: int = 0
@@ -149,6 +159,7 @@ class Cell(SliceableMixin):
 
     @property
     def is_memoized(self) -> bool:
+        """Whether this cell opted into memoization via the ``%%memoize`` directive."""
         return self.memoized_output_level is not None
 
     @property
@@ -942,6 +953,14 @@ class Cell(SliceableMixin):
         format_type: Optional[Type[FormatType]] = None,
         include_cell_headers: bool = True,
     ) -> Slice:
+        """Return the backward slice needed to reconstruct this cell.
+
+        :param stmts: if ``True``, slice at statement granularity (dropping
+            unneeded statements within cells); otherwise include whole cells.
+        :param seed_only: restrict the slice to this cell alone (no upstream).
+        :param format_type: optional output format (e.g. ``str``).
+        :param include_cell_headers: whether to emit ``# Cell N`` headers.
+        """
         if stmts:
             return self.format_multi_slice(
                 self.compute_slice_stmts(),

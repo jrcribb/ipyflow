@@ -34,11 +34,20 @@ _stmt_offset = 0
 
 
 class Timestamp(NamedTuple):
+    """A ``(cell_num, stmt_num)`` pair naming one point in execution.
+
+    ``cell_num`` is the cell execution counter (1-indexed, strictly increasing
+    across the session); ``stmt_num`` is the 0-indexed statement within that cell
+    execution. Comparing the timestamp of a symbol against those of its
+    dependencies is how ipyflow decides staleness.
+    """
+
     cell_num: int
     stmt_num: int
 
     @classmethod
     def current(cls) -> "Timestamp":
+        """Return the timestamp of the currently-executing point."""
         # TODO: shouldn't have to go through flow() singleton to get the cell counter,
         #  but the dependency structure prevents us from importing from ipyflow.data_model.code_cell
         if tracer_initialized():
@@ -59,6 +68,7 @@ class Timestamp(NamedTuple):
 
     @property
     def is_initialized(self) -> bool:
+        """Whether this is a real timestamp (not the sentinel uninitialized one)."""
         uninited = Timestamp.uninitialized()
         return self.cell_num > uninited.cell_num and self.stmt_num > uninited.stmt_num
 

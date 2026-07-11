@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-record uitest-report e2e jupyterlite jupyterlite-serve jupyterlite-dev
+.PHONY: clean black blackcheck eslint imports build deploy_only deploy check check_no_typing test tests deps devdeps dev typecheck version bump extlink kernel uitest uitest-record uitest-report e2e jupyterlite jupyterlite-serve jupyterlite-dev docs docs_doctest
 
 # Prefer uv if available, otherwise fall back to pip. Override with `make <t> PIP=...`.
 ifeq ($(shell command -v uv 2>/dev/null),)
@@ -60,6 +60,12 @@ xmlcov: coverage
 
 eslint:
 	./scripts/eslint.sh
+
+docs:
+	$(MAKE) -C docs html
+
+docs_doctest:
+	$(MAKE) -C docs doctest
 
 check: eslint blackcheck lint typecheck check_no_typing
 

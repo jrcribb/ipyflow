@@ -1,0 +1,25 @@
+# .readthedocs.yml
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+# Required
+version: 2
+
+# Set the OS and tool versions used to build the docs (required by RTD)
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+
+# Build documentation in the docs/ directory with Sphinx
+sphinx:
+  configuration: docs/conf.py
+
+# Install the real backend package (``ipyflow-core`` under core/, the autodoc
+# target -- the top-level ``ipyflow`` is a thin metapackage) plus the docs
+# requirements.
+python:
+  install:
+    - method: pip
+      path: ./core
+    - requirements: docs/requirements-docs.txt
