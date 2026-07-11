@@ -38,9 +38,14 @@ async function ensureIpyflowInstalled(session: ISessionContext): Promise<void> {
     "if _sys.platform == 'emscripten':",
     '    try:',
     '        import piplite as _piplite',
-    // keep_going=True mirrors what the `%pip install` magic does: skip deps that
-    // can't be resolved in-browser (e.g. ipykernel/pyzmq, ipywidgets) rather
-    // than failing the whole install. ipyflow imports fine without them.
+    // keep_going=True mirrors what the `%pip install` magic does. Note it does
+    // NOT skip deps that are entirely unresolvable (a missing-metadata lookup
+    // still raises) -- it only aggregates "no pure-Python wheel" errors. All of
+    // ipyflow-core's deps must therefore resolve from an offline index: comm /
+    // traitlets / pyccolo / black / nest_asyncio are bundled by jupyterlite/
+    // build.sh, ipykernel is stubbed by jupyterlite-pyodide-kernel, and ipython
+    // ships in Pyodide's lockfile. nest_asyncio in particular is easy to miss
+    // because it is a hard dep but is NOT in the Pyodide lockfile.
     "        await _piplite.install('ipyflow-core', keep_going=True)",
     '    except Exception:',
     '        pass',

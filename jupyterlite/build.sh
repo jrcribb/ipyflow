@@ -60,9 +60,16 @@ echo "==> Installing the labextension into the build env (for jupyter lite build
 python -m pip install --no-deps "$ROOTDIST"/ipyflow-*.whl
 
 echo "==> Bundling pure-Python runtime deps offline (fast, robust load)"
+# Every hard dependency of ipyflow-core must resolve from an OFFLINE index:
+# piplite/micropip only falls back to pypi.org at runtime, and when that fetch
+# fails (PyPI CORS / network / a stricter micropip) the whole in-browser install
+# dies with e.g. "Can't fetch metadata for 'nest_asyncio'". So bundle every dep
+# that is NOT already provided by Pyodide's lockfile (ipython, traitlets, ...)
+# or stubbed by jupyterlite-pyodide-kernel (ipykernel). In particular nest_asyncio
+# is a hard dep that is NOT in the lockfile and is easy to miss.
 python -m pip download --only-binary=:all: \
   --implementation py --abi none --platform any \
-  pyccolo pipescript traitlets comm black astunparse typing-extensions -d "$WHEELS"
+  pyccolo pipescript traitlets comm black astunparse typing-extensions nest_asyncio -d "$WHEELS"
 # keep only universal (pure-Python) wheels
 find "$WHEELS" -name '*.whl' ! -name '*-none-any.whl' -delete || true
 echo "  bundled $(ls "$WHEELS"/*.whl | wc -l | tr -d ' ') wheels into $(basename "$WHEELS")/"
