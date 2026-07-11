@@ -1,12 +1,13 @@
 <h1> <img src="https://raw.githubusercontent.com/ipyflow/ipyflow/master/img/ipyflow-logo.png" width="25"> IPyflow </h1>
 
 [![](https://github.com/ipyflow/ipyflow/workflows/ipyflow/badge.svg)](https://github.com/ipyflow/ipyflow/actions)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://ipyflow.github.io/ipyflow/lab/index.html?path=demo.ipynb)
+[![Documentation Status](https://readthedocs.org/projects/ipyflow/badge/?version=latest)](https://ipyflow.readthedocs.io/en/latest/?badge=latest)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![](https://img.shields.io/pypi/v/ipyflow.svg)](https://pypi.org/project/ipyflow)
 ![](https://img.shields.io/pypi/pyversions/ipyflow.svg)
-[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://ipyflow.github.io/ipyflow/lab/index.html?path=demo.ipynb)
 
 TL;DR
 -----
