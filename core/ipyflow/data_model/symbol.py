@@ -763,7 +763,19 @@ class Symbol:
     def _should_cancel_propagation(self, prev_obj: Optional[Any]) -> bool:
         if prev_obj is None:
             return False
-        if not self._cached_out_of_sync or self.obj_id == self.cached_obj_id:
+        if not self._cached_out_of_sync:
+            return True
+        if self.obj_id == self.cached_obj_id and not self.is_immutable:
+            # An unchanged obj_id normally means the symbol still points at the
+            # very same object, so re-running the assignment need not propagate
+            # staleness to dependents. This identity heuristic is unreliable for
+            # immutable primitives (small ints, interned strings, ...), which
+            # CPython caches/interns: re-running `x = 4` yields the same id(4)
+            # as before even though it is a genuine (re-)assignment. Treating
+            # that as "nothing changed" cancels propagation, so transitive
+            # dependents never get marked. We therefore only trust obj_id
+            # equality for mutable objects and fall through to propagate for
+            # primitives, so that re-execution is always a fresh update.
             return True
         if self.obj is None or prev_obj is Symbol.NULL:
             return self.obj is None and prev_obj is Symbol.NULL

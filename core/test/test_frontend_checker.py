@@ -265,6 +265,34 @@ def test_updated_namespace_after_subscript_dep_removed():
     assert response.ready_cells == set(), "got %s" % response.ready_cells
 
 
+def test_primitive_rerun_same_value_propagates_transitively():
+    # Regression: re-running an assignment to an equal immutable primitive
+    # (`x = 4`) must propagate to the whole transitive slice, exactly as it
+    # does when the value changes (`x = 42`). Previously the `id(4) == id(4)`
+    # short-circuit in `Symbol._should_cancel_propagation` cancelled
+    # propagation, so only the direct dependent (`y`) was flagged while the
+    # transitive dependents (`z`, `print`) were left inconsistent.
+    cells_to_run = {
+        0: "x = 4",
+        1: "y = x + 1",
+        2: "z = y * 10",
+        3: "logging.info((x, y, z))",
+    }
+    run_all_cells(cells_to_run)
+    response = flow().check_and_link_multiple_cells()
+    assert response.waiting_cells == set()
+    assert response.ready_cells == set()
+
+    run_cell("x = 4", 0)  # rerun with the SAME value
+    same = flow().check_and_link_multiple_cells()
+    run_cell("x = 42", 0)  # rerun with a CHANGED value
+    changed = flow().check_and_link_multiple_cells()
+
+    # same-value rerun must behave identically to changed-value rerun
+    assert same.ready_cells == changed.ready_cells == {1}
+    assert same.waiting_cells == changed.waiting_cells == {2, 3}
+
+
 def test_equal_list_update_does_induce_fresh_cell():
     cells_to_run = {
         0: 'x = ["f"] + ["o"] * 10',

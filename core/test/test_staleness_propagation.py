@@ -878,21 +878,30 @@ def test_branching_2():
     assert_detected("x depends on stale y")
 
 
+# NB: the tests below previously asserted that re-assigning an *immutable
+# primitive* (int, str, ...) back to an equal value would NOT propagate
+# staleness, relying on `id(obj)` staying constant. Because CPython
+# caches/interns small ints and short strings, that identity check could not
+# tell a genuine re-assignment apart from "no change" and only ever fired for
+# direct dependents (leaving transitive dependents unmarked -- see
+# `Symbol._should_cancel_propagation`). We now treat re-executing an
+# assignment as a fresh update for immutable primitives, so it propagates to
+# the full transitive slice, consistent with how mutable objects (which get a
+# fresh id) already behave.
 def test_identity_checking():
     run_cell("y = 7")
     run_cell("x = y + 3")
     run_cell("y = 7")
     run_cell("logging.info(x)")
-    assert_not_detected("`y` was not mutated")
+    assert_detected("re-executing `y = 7` refreshes `x`")
 
 
 def test_identity_checking_obj():
-    # To get this working properly, we need to create datasyms for all of the values in the literal
     run_cell("y = [7]")
     run_cell("x = y + [3]")
     run_cell("y[0] = 7")
     run_cell("logging.info(x)")
-    assert_not_detected("`y` was not mutated")
+    assert_detected("re-executing `y[0] = 7` refreshes `x`")
 
 
 def test_identity_checking_obj_2():
@@ -903,7 +912,7 @@ def test_identity_checking_obj_2():
     assert_not_detected("`z` independent of x")
     run_cell("y[0] = 8")
     run_cell("logging.info(z)")
-    assert_not_detected("`y` was not mutated")
+    assert_detected("re-executing `y[0] = 8` refreshes `z`")
     run_cell("y[0] = 42")
     run_cell("logging.info(z)")
     assert_detected("`y` was mutated")
@@ -914,43 +923,40 @@ def test_identity_checking_obj_3():
     run_cell("x = list(d.values()) + [3]")
     run_cell('d["y"] = 7')
     run_cell("logging.info(x)")
-    assert_not_detected('`d["y"]` was not mutated')
+    assert_detected('re-executing `d["y"] = 7` refreshes `x`')
     run_cell('d["y"] = 8')
     run_cell("logging.info(x)")
     assert_detected('`d["y"]` was mutated')
 
 
 def test_identity_checking_obj_4():
-    # To get this working properly, we need to create datasyms for literal namespaces recursively
     run_cell('d = {"y": [7]}')
     run_cell('d["x"] = d["y"] + [3]')
     run_cell('d["y"][0] = 7')
     run_cell('logging.info(d["x"])')
-    assert_not_detected('`d["y"]` was not mutated')
+    assert_detected('re-executing `d["y"][0] = 7` refreshes `d["x"]`')
     run_cell('d["y"][0] = 8')
     run_cell('logging.info(d["x"])')
     assert_detected('`d["y"]` was mutated')
 
 
 def test_identity_checking_obj_5():
-    # To get this working properly, we need to create datasyms for literal namespaces recursively
     run_cell('d = {"y": {0: 7}}')
     run_cell('d["x"] = {1:3, **d["y"]}')
     run_cell('d["y"][0] = 7')
     run_cell('logging.info(d["x"])')
-    assert_not_detected('`d["y"]` was not mutated')
+    assert_detected('re-executing `d["y"][0] = 7` refreshes `d["x"]`')
     run_cell('d["y"][0] = 8')
     run_cell('logging.info(d["x"])')
     assert_detected('`d["y"]` was mutated')
 
 
 def test_identity_checking_obj_6():
-    # To get this working properly, we need to create datasyms for literal namespaces recursively
     run_cell("lst = [[1, 2], 0]")
     run_cell("lst[1] = lst[0] + [3, 4]")
     run_cell("lst[0][1] = 2")
     run_cell("logging.info(lst[1])")
-    assert_not_detected("`lst[0][1]` was not mutated")
+    assert_detected("re-executing `lst[0][1] = 2` refreshes `lst[1]`")
     run_cell("lst[0][1] = 42")
     run_cell("logging.info(lst[1])")
     assert_detected("`lst[0][1]` was mutated")
